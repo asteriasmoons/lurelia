@@ -1,0 +1,95 @@
+//
+//  KanbanModels.swift
+//  Lurelia
+//
+
+import Foundation
+import SwiftData
+
+// MARK: - Card Type
+
+enum KanbanCardType: String, Codable {
+    case reminder = "reminder"
+}
+
+// MARK: - KanbanBoard
+
+@Model
+final class KanbanBoard {
+
+    var id: UUID = UUID()
+    var name: String = ""
+    var icon: String = "starcal"
+    var colorHex: String = "#03dbfc"
+    var sortOrder: Int = 0
+    var createdAt: Date = Date()
+    var updatedAt: Date = Date()
+
+    @Relationship(deleteRule: .cascade, inverse: \KanbanColumn.board)
+    var columns: [KanbanColumn]?
+
+    init(name: String, icon: String = "starcal", colorHex: String = "#03dbfc", sortOrder: Int = 0) {
+        self.id        = UUID()
+        self.name      = name
+        self.icon      = icon
+        self.colorHex  = colorHex
+        self.sortOrder = sortOrder
+        self.createdAt = Date()
+        self.updatedAt = Date()
+    }
+
+    var sortedColumns: [KanbanColumn] {
+        (columns ?? []).sorted { $0.sortOrder < $1.sortOrder }
+    }
+}
+
+// MARK: - KanbanColumn
+
+@Model
+final class KanbanColumn {
+
+    var id: UUID = UUID()
+    var name: String = ""
+    var colorHex: String = "#03dbfc"
+    var sortOrder: Int = 0
+    var createdAt: Date = Date()
+
+    var board: KanbanBoard?
+
+    @Relationship(deleteRule: .cascade, inverse: \KanbanCard.column)
+    var cards: [KanbanCard]?
+
+    init(name: String, colorHex: String = "#03dbfc", sortOrder: Int = 0) {
+        self.id        = UUID()
+        self.name      = name
+        self.colorHex  = colorHex
+        self.sortOrder = sortOrder
+        self.createdAt = Date()
+    }
+
+    var sortedCards: [KanbanCard] {
+        (cards ?? []).sorted { $0.sortOrder < $1.sortOrder }
+    }
+}
+
+// MARK: - KanbanCard
+
+@Model
+final class KanbanCard {
+
+    var id: UUID = UUID()
+    var cardType: KanbanCardType = KanbanCardType.reminder
+    var itemID: String = ""   // UUID string of the linked reminder
+    var sortOrder: Int = 0
+    var createdAt: Date = Date()
+
+    var column: KanbanColumn?
+
+    init(cardType: KanbanCardType, itemID: UUID, sortOrder: Int = 0) {
+        self.id        = UUID()
+        self.cardType  = .reminder
+        self.itemID    = itemID.uuidString
+        self.sortOrder = sortOrder
+        self.createdAt = Date()
+    }
+}
