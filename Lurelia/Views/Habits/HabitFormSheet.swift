@@ -54,6 +54,7 @@ struct LureliaHabitFormSheet: View {
     @State private var environmentChanges = ""
     @State private var temptationNeed = ""
     @State private var temptationWant = ""
+    @State private var levels: [LureliaHabitLevel] = []
     @State private var habitRules: [String] = []
     @State private var habitObstacles: [String] = []
     @State private var habitSolutions: [String] = []
@@ -149,6 +150,7 @@ struct LureliaHabitFormSheet: View {
                             habitRules: $habitRules,
                             habitObstacles: $habitObstacles,
                             habitSolutions: $habitSolutions,
+                            levels: $levels,
                             immediateReward: $immediateReward,
                             longTermReward: $longTermReward
                         )
@@ -254,6 +256,7 @@ struct LureliaHabitFormSheet: View {
         habitRules = habit.habitRules
         habitObstacles = habit.habitObstacles
         habitSolutions = habit.habitSolutions
+        levels = habit.levels
         immediateReward = habit.immediateReward ?? ""
         longTermReward = habit.longTermReward ?? ""
 
@@ -324,6 +327,7 @@ struct LureliaHabitFormSheet: View {
         target.habitRules = habitRules.filter { !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
         target.habitObstacles = habitObstacles.filter { !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
         target.habitSolutions = habitSolutions
+        target.levels = levels
         target.immediateReward = immediateReward.isEmpty ? nil : immediateReward
         target.longTermReward = longTermReward.isEmpty ? nil : longTermReward
 

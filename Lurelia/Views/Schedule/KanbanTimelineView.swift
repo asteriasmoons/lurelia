@@ -750,6 +750,11 @@ struct KanbanTimelineView: View {
 
     private func resolvedTimesOfDay(for reminder: LureliaReminder) -> [String] {
         let stored = reminder.timesOfDay.filter { !$0.isEmpty }
+        
+        print("==========")
+        print("Reminder:", reminder.title)
+        print("timesOfDay:", reminder.timesOfDay)
+        print("additionalFireTimes:", reminder.additionalFireTimes)
 
         if !stored.isEmpty {
             return stored
@@ -788,11 +793,9 @@ struct KanbanTimelineView: View {
                 }
 
                 let dates = fireDates(for: reminder, on: selectedDay).filter { fireDate in
-                    if calendar.isDateInToday(selectedDay) {
-                        return !reminder.wasCompleted(on: selectedDay, calendar: calendar)
-                    }
-
-                    return true
+                    fireDate >= timelineStartForSelectedDay &&
+                    fireDate < timelineEndForSelectedDay &&
+                    !reminder.wasCompleted(on: selectedDay, calendar: calendar)
                 }
 
                 fireDatesForColumn.append(contentsOf: dates)
@@ -873,11 +876,7 @@ struct KanbanTimelineColumnView: View {
                     return abs(fireDate.timeIntervalSince(forcedFireDate)) < 60
                 }
 
-                if Calendar.current.isDateInToday(selectedDay) {
-                    return !reminder.wasCompleted(on: selectedDay, calendar: .current)
-                }
-
-                return true
+                return !reminder.wasCompleted(on: selectedDay, calendar: .current)
             }
 
             for fireDate in fireDates {

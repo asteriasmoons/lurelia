@@ -104,6 +104,10 @@ final class LureliaHabit {
     // MARK: - Blueprint: Friction
 
     var friction: String?
+    
+    // MARK: - Blueprint: Levels
+
+    var levelsStorage: String = "[]"
 
     // MARK: - Blueprint: Rules (JSON array)
 
@@ -231,6 +235,37 @@ extension LureliaHabit {
             updatedAt = Date()
         }
     }
+    
+    var levels: [LureliaHabitLevel] {
+        get {
+            guard let data = levelsStorage.data(using: .utf8),
+                  let decoded = try? JSONDecoder().decode([LureliaHabitLevel].self, from: data)
+            else {
+                return []
+            }
+
+            return decoded
+        }
+        set {
+            guard let data = try? JSONEncoder().encode(newValue),
+                  let json = String(data: data, encoding: .utf8)
+            else {
+                levelsStorage = "[]"
+                return
+            }
+
+            levelsStorage = json
+            updatedAt = Date()
+        }
+    }
+
+    var levelCount: Int {
+        levels.count
+    }
+
+    var hasLevels: Bool {
+        !levels.isEmpty
+    }
 
     var hasBlueprint: Bool {
         identityStatement?.isEmpty == false ||
@@ -246,6 +281,7 @@ extension LureliaHabit {
         idealEnvironment?.isEmpty == false ||
         environmentChanges?.isEmpty == false
         || friction?.isEmpty == false
+        || hasLevels
     }
 
     // MARK: - Active weekdays
@@ -434,5 +470,27 @@ extension LureliaHabit {
         }
 
         return completedDays.union(skippedDays).count >= max(1, activeDaysInWeek.count)
+    }
+}
+
+struct LureliaHabitLevel: Codable, Identifiable, Hashable {
+    var id: UUID = UUID()
+    var title: String
+    var sortOrder: Int
+    var createdAt: Date
+    var updatedAt: Date
+
+    init(
+        id: UUID = UUID(),
+        title: String,
+        sortOrder: Int = 0,
+        createdAt: Date = Date(),
+        updatedAt: Date = Date()
+    ) {
+        self.id = id
+        self.title = title
+        self.sortOrder = sortOrder
+        self.createdAt = createdAt
+        self.updatedAt = updatedAt
     }
 }

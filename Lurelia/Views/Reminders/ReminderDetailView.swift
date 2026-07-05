@@ -226,6 +226,18 @@ struct ReminderDetailView: View {
                     sectionCard(title: "Tiny Nudge", icon: "starchat") {
                         frictionBox
                     }
+                    
+                    // MARK: - Habit Levels
+
+                    if reminder.hasLevels {
+                        sectionCard(title: "Habit Levels", icon: "starprogressbar") {
+                            VStack(alignment: .leading, spacing: 10) {
+                                ForEach(sortedLevels, id: \.id) { level in
+                                    levelRow(level)
+                                }
+                            }
+                        }
+                    }
 
                     // MARK: - Completion Steps (Checklist)
 
@@ -923,6 +935,54 @@ struct ReminderDetailView: View {
         reminder.checklistItems
             .filter { !$0.title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
             .sorted { $0.sortOrder < $1.sortOrder }
+    }
+    
+    private var sortedLevels: [LureliaReminderLevel] {
+        reminder.levels
+            .filter {
+                !$0.title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            }
+            .sorted {
+                $0.sortOrder < $1.sortOrder
+            }
+    }
+    
+    private func levelRow(_ level: LureliaReminderLevel) -> some View {
+        let iconNumber = (level.sortOrder + 1) % 10
+
+        return HStack(spacing: 10) {
+
+            Image("\(iconNumber)wavy")
+                .renderingMode(.template)
+                .resizable()
+                .scaledToFit()
+                .frame(width: 18, height: 18)
+                .foregroundStyle(LGradients.header)
+
+            Text(level.title)
+                .font(.system(size: 13, weight: .semibold, design: .rounded))
+                .foregroundStyle(.white.opacity(0.85))
+                .frame(maxWidth: .infinity, alignment: .leading)
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 10)
+        .background(.white.opacity(0.055))
+        .clipShape(
+            RoundedRectangle(
+                cornerRadius: 14,
+                style: .continuous
+            )
+        )
+        .overlay(
+            RoundedRectangle(
+                cornerRadius: 14,
+                style: .continuous
+            )
+            .strokeBorder(
+                .white.opacity(0.09),
+                lineWidth: 1
+            )
+        )
     }
 
     private func weekdayShort(_ value: Int) -> String? {

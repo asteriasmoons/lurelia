@@ -20,6 +20,7 @@ struct HabitBlueprintFormSection: View {
     @Binding var habitRules: [String]
     @Binding var habitObstacles: [String]
     @Binding var habitSolutions: [String]
+    @Binding var levels: [LureliaHabitLevel]
     @Binding var immediateReward: String
     @Binding var longTermReward: String
 
@@ -327,6 +328,84 @@ struct HabitBlueprintFormSection: View {
                     .buttonStyle(.plain)
                 }
             }
+            
+            // MARK: - Habit Levels
+
+            subsectionLabel("HABIT LEVELS")
+
+            GlassCard {
+                VStack(alignment: .leading, spacing: 12) {
+
+                    ForEach(Array(levels.enumerated()), id: \.offset) { index, _ in
+
+                        HStack(alignment: .center, spacing: 10) {
+
+                            Image("\(min(index + 1, 9))wavy")
+                                .renderingMode(.template)
+                                .resizable()
+                                .scaledToFit()
+                                .frame(width: 22, height: 22)
+                                .foregroundStyle(LGradients.header)
+
+                            TextField(
+                                "Level \(index + 1)",
+                                text: levelBinding(index)
+                            )
+                            .font(.system(size: 14, design: .rounded))
+                            .foregroundStyle(.white)
+
+                            Button {
+                                levels.remove(at: index)
+                                normalizeLevelSortOrder()
+                            } label: {
+                                Image("xmarkwavy")
+                                    .renderingMode(.template)
+                                    .resizable()
+                                    .scaledToFit()
+                                    .frame(width: 16, height: 16)
+                                    .foregroundStyle(.white.opacity(0.35))
+                            }
+                            .buttonStyle(.plain)
+                        }
+
+                        if index < levels.count - 1 {
+                            Rectangle()
+                                .fill(.white.opacity(0.06))
+                                .frame(height: 1)
+                        }
+                    }
+
+                    Button {
+
+                        guard levels.count < 9 else { return }
+
+                        levels.append(
+                            LureliaHabitLevel(
+                                title: "",
+                                sortOrder: levels.count
+                            )
+                        )
+
+                    } label: {
+
+                        HStack(spacing: 6) {
+
+                            Image("addwavy")
+                                .renderingMode(.template)
+                                .resizable()
+                                .scaledToFit()
+                                .frame(width: 16, height: 16)
+                                .foregroundStyle(LGradients.header)
+
+                            Text("Add Level")
+                                .font(.system(size: 13, weight: .semibold, design: .rounded))
+                                .foregroundStyle(.white.opacity(0.6))
+                        }
+
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
 
             // MARK: - Rewards
 
@@ -453,6 +532,27 @@ struct HabitBlueprintFormSection: View {
                 .foregroundStyle(.white)
                 .scrollContentBackground(.hidden)
                 .frame(minHeight: 70)
+        }
+    }
+    
+    private func levelBinding(_ index: Int) -> Binding<String> {
+        Binding(
+            get: {
+                guard levels.indices.contains(index) else { return "" }
+                return levels[index].title
+            },
+            set: { newValue in
+                guard levels.indices.contains(index) else { return }
+                levels[index].title = newValue
+                levels[index].updatedAt = Date()
+            }
+        )
+    }
+
+    private func normalizeLevelSortOrder() {
+        for index in levels.indices {
+            levels[index].sortOrder = index
+            levels[index].updatedAt = Date()
         }
     }
 

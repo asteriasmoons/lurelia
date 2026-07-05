@@ -234,6 +234,18 @@ struct HabitBlueprintDetailView: View {
                             sectionBody(purpose)
                         }
                     }
+                    
+                    // MARK: - Habit Levels
+
+                    if habit.hasLevels {
+                        sectionCard(title: "Habit Levels", icon: "starprogressbar") {
+                            VStack(alignment: .leading, spacing: 10) {
+                                ForEach(sortedLevels) { level in
+                                    levelRow(level)
+                                }
+                            }
+                        }
+                    }
 
                     // MARK: - Implementation Intention
 
@@ -755,6 +767,44 @@ struct HabitBlueprintDetailView: View {
                 .foregroundStyle(.white)
         }
     }
+    
+    private func levelRow(_ level: LureliaHabitLevel) -> some View {
+        let iconNumber = (level.sortOrder + 1) % 10
+
+        return HStack(spacing: 12) {
+
+            Image("\(iconNumber)wavy")
+                .renderingMode(.template)
+                .resizable()
+                .scaledToFit()
+                .frame(width: 22, height: 22)
+                .foregroundStyle(LGradients.header)
+
+            Text(level.title)
+                .font(.system(size: 14, weight: .semibold, design: .rounded))
+                .foregroundStyle(.white.opacity(0.85))
+                .frame(maxWidth: .infinity, alignment: .leading)
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 10)
+        .background(.white.opacity(0.055))
+        .clipShape(
+            RoundedRectangle(
+                cornerRadius: 14,
+                style: .continuous
+            )
+        )
+        .overlay(
+            RoundedRectangle(
+                cornerRadius: 14,
+                style: .continuous
+            )
+            .strokeBorder(
+                .white.opacity(0.09),
+                lineWidth: 1
+            )
+        )
+    }
 
     private func detailPill(_ text: String) -> some View {
         Text(text)
@@ -772,6 +822,16 @@ struct HabitBlueprintDetailView: View {
         if weekdays.count == 7 { return "Every day" }
         let labels: [Int: String] = [1: "Sun", 2: "Mon", 3: "Tue", 4: "Wed", 5: "Thu", 6: "Fri", 7: "Sat"]
         return weekdays.sorted().compactMap { labels[$0] }.joined(separator: ", ")
+    }
+    
+    private var sortedLevels: [LureliaHabitLevel] {
+        habit.levels
+            .filter {
+                !$0.title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            }
+            .sorted {
+                $0.sortOrder < $1.sortOrder
+            }
     }
 
     private struct CueCountEntry {
