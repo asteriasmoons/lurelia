@@ -11,7 +11,6 @@ import WidgetKit
 
 struct KanbanTimelineView: View {
     @Environment(\.modelContext) private var modelContext
-    @Environment(\.dismiss) private var dismiss
 
     @Query(sort: \KanbanBoard.sortOrder)
     private var boards: [KanbanBoard]
@@ -113,18 +112,6 @@ struct KanbanTimelineView: View {
                             .buttonStyle(.plain)
                             .disabled(selectedBoard == nil)
                             .opacity(selectedBoard == nil ? 0.35 : 1)
-
-                            Button {
-                                dismiss()
-                            } label: {
-                                Image("xmarkwavy")
-                                    .renderingMode(.template)
-                                    .resizable()
-                                    .scaledToFit()
-                                    .frame(width: 28, height: 28)
-                                    .foregroundStyle(LGradients.header)
-                            }
-                            .buttonStyle(.plain)
                         }
                     }
                     .padding(.horizontal, 24)
@@ -747,6 +734,36 @@ struct KanbanTimelineView: View {
         }
         .sorted()
     }
+    
+    private func isOccurrenceCompleted(
+        _ reminder: LureliaReminder,
+        fireDate: Date,
+        allFireDates: [Date]
+    ) -> Bool {
+        let completions = ([reminder.completedAt].compactMap { $0 } + reminder.completionTimestamps)
+            .filter { calendar.isDate($0, inSameDayAs: selectedDay) }
+
+        guard !completions.isEmpty else {
+            return false
+        }
+
+        let sortedFireDates = allFireDates.sorted()
+
+        guard let index = sortedFireDates.firstIndex(of: fireDate) else {
+            return reminder.wasCompleted(on: selectedDay, calendar: calendar)
+        }
+
+        let nextFireDate: Date? = {
+            let nextIndex = index + 1
+            guard sortedFireDates.indices.contains(nextIndex) else { return nil }
+            return sortedFireDates[nextIndex]
+        }()
+
+        return completions.contains { completedAt in
+            completedAt >= fireDate &&
+            (nextFireDate == nil || completedAt < nextFireDate!)
+        }
+    }
 
     private func resolvedTimesOfDay(for reminder: LureliaReminder) -> [String] {
         let stored = reminder.timesOfDay.filter { !$0.isEmpty }
@@ -778,29 +795,49 @@ struct KanbanTimelineView: View {
     }
     
     private var timelineColumnOccurrences: [KanbanTimelineColumnOccurrence] {
-        guard let board = selectedBoard else { return [] }
+        print("🔥 TIMELINE COLUMN OCCURRENCES RAN")
 
+        guard let board = selectedBoard else {
+            print("❌ No selected board")
+            return []
+        }
+
+        print("📌 Board:", board.name)
+        print("📌 Columns:", board.sortedColumns.map { $0.name })
+        print("📌 Column card counts:", board.sortedColumns.map { "\($0.name): \($0.sortedCards.count)" })
+        
         var occurrences: [KanbanTimelineColumnOccurrence] = []
 
         for column in board.sortedColumns {
+            print("➡️ COLUMN START:", column.name)
+            print("➡️ CARD COUNT:", column.sortedCards.count)
+
             var fireDatesForColumn: [Date] = []
 
             for card in column.sortedCards {
+                print("   CARD:", card.cardType, card.itemID)
                 guard card.cardType == .reminder,
                       let reminder = selectedDayStandaloneReminders.first(where: { $0.id.uuidString == card.itemID })
                 else {
                     continue
                 }
 
-                let dates = fireDates(for: reminder, on: selectedDay).filter { fireDate in
+                let allFireDates = fireDates(for: reminder, on: selectedDay)
+
+                let dates = allFireDates.filter { fireDate in
                     fireDate >= timelineStartForSelectedDay &&
                     fireDate < timelineEndForSelectedDay &&
-                    !reminder.wasCompleted(on: selectedDay, calendar: calendar)
+                    !isOccurrenceCompleted(reminder, fireDate: fireDate, allFireDates: allFireDates)
                 }
 
                 fireDatesForColumn.append(contentsOf: dates)
             }
 
+            print("COLUMN:", column.name)
+            print(fireDatesForColumn.map {
+                $0.formatted(date: .omitted, time: .shortened)
+            })
+            
             let uniqueDates = Array(Set(fireDatesForColumn)).sorted()
 
             for fireDate in uniqueDates {
@@ -876,7 +913,7 @@ struct KanbanTimelineColumnView: View {
                     return abs(fireDate.timeIntervalSince(forcedFireDate)) < 60
                 }
 
-                return !reminder.wasCompleted(on: selectedDay, calendar: .current)
+                return true
             }
 
             for fireDate in fireDates {

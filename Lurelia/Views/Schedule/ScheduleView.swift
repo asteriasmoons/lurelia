@@ -56,29 +56,16 @@ struct ScheduleView: View {
                         CalendarView()
                             .padding(.bottom, 4)
 
-                        HStack(spacing: 14) {
-                            Button {
-                                showTimeBlockView = true
-                            } label: {
-                                ScheduleSquareActionCard(
-                                    icon: "clockfill",
-                                    title: "Time Block",
-                                    subtitle: "Arrange today by time."
-                                )
-                            }
-                            .buttonStyle(.plain)
-
-                            Button {
-                                showKanbanTimeline = true
-                            } label: {
-                                ScheduleSquareActionCard(
-                                    icon: "clockwavy",
-                                    title: "Kanban Timeline",
-                                    subtitle: "View reminders by day."
-                                )
-                            }
-                            .buttonStyle(.plain)
+                        Button {
+                            showTimeBlockView = true
+                        } label: {
+                            ScheduleSquareActionCard(
+                                icon: "clockfill",
+                                title: "Time Block",
+                                subtitle: "Arrange today by time."
+                            )
                         }
+                        .buttonStyle(.plain)
                         .padding(.horizontal, 24)
 
                         if boards.isEmpty {
@@ -121,9 +108,6 @@ struct ScheduleView: View {
             }
             .fullScreenCover(isPresented: $showTimeBlockView) {
                 TimeBlockView()
-            }
-            .fullScreenCover(isPresented: $showKanbanTimeline) {
-                KanbanTimelineView()
             }
             .sheet(item: $editingBoard) { board in
                 CreateBoardView(board: board)

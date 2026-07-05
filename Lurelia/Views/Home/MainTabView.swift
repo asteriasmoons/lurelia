@@ -13,28 +13,32 @@ struct RoutineWrapper: Identifiable {
 
 enum LureliaTab: CaseIterable {
     case reminders
+    case kantime
     case schedule
     case habits
     case journeys
     case profile
 
     static let primaryTabs: [LureliaTab] = [
+        .kantime,
         .reminders,
-        .schedule,
         .habits,
         .journeys
     ]
 
     static let overflowTabs: [LureliaTab] = [
-        .profile
+        .profile,
+        .schedule
     ]
 
     var icon: String {
         switch self {
+        case .kantime:
+            return "ringstarcal"
         case .reminders:
             return "bellfill"
         case .schedule:
-            return "ringstarcal"
+            return "starnote"
         case .habits:
             return "clockfill"
         case .journeys:
@@ -46,6 +50,8 @@ enum LureliaTab: CaseIterable {
 
     var title: String {
         switch self {
+        case .kantime:
+            return "Kanban Timeline"
         case .reminders:
             return "Reminders"
         case .schedule:
@@ -61,7 +67,7 @@ enum LureliaTab: CaseIterable {
 }
 
 struct MainTabView: View {
-    @State private var selectedTab: LureliaTab = .reminders
+    @State private var selectedTab: LureliaTab = .kantime
     @State private var activeRoutineToOpen: RoutineWrapper?
     
     @Query private var routineRuns: [LureliaRoutineRun]
@@ -105,6 +111,8 @@ struct MainTabView: View {
     @ViewBuilder
     private var selectedTabView: some View {
         switch selectedTab {
+        case .kantime:
+            KanbanTimelineView()
         case .reminders:
             RemindersView()
         case .schedule:
