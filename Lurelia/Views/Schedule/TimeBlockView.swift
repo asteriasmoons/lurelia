@@ -16,6 +16,22 @@ private struct ReminderSlot: Identifiable {
     let fireDate: Date
 }
 
+private enum TimelineSlot: Identifiable {
+    case reminder(ReminderSlot)
+    
+    var id: UUID {
+        switch self {
+        case .reminder(let s): return s.id
+        }
+    }
+    
+    var fireDate: Date {
+        switch self {
+        case .reminder(let s): return s.fireDate
+        }
+    }
+}
+
 // MARK: - TimeBlockView
 
 struct TimeBlockView: View {
@@ -29,16 +45,16 @@ struct TimeBlockView: View {
     // Mutating this at midnight forces todaysSlots to recompute.
     @State private var currentDay: Date = Calendar.current.startOfDay(for: Date())
 
-    // All slots for today, one per (reminder × fire-time).
-    private var todaysSlots: [ReminderSlot] {
+    // All slots for today, one per (reminder × fire-time) + routine tasks.
+    private var todaysSlots: [TimelineSlot] {
         let today = calendar.startOfDay(for: currentDay)
-        var slots: [ReminderSlot] = []
+        var slots: [TimelineSlot] = []
 
         for reminder in reminders where reminder.isEnabled && reminder.kind == .standalone {
             guard shouldShowReminder(reminder, on: today) else { continue }
 
             for fireDate in resolvedFireTimesToday(reminder, today: today) {
-                slots.append(ReminderSlot(reminder: reminder, fireDate: fireDate))
+                slots.append(.reminder(ReminderSlot(reminder: reminder, fireDate: fireDate)))
             }
         }
 
@@ -193,7 +209,7 @@ struct TimeBlockView: View {
 
     // MARK: - Slot helpers
 
-    private func slotsForHour(_ hour: Int) -> [ReminderSlot] {
+    private func slotsForHour(_ hour: Int) -> [TimelineSlot] {
         todaysSlots.filter { calendar.component(.hour, from: $0.fireDate) == hour }
     }
 
@@ -315,7 +331,7 @@ struct TimeBlockView: View {
 
 private struct TimeBlockHourRow: View {
     let hour: Int
-    let slots: [ReminderSlot]
+    let slots: [TimelineSlot]
     let isCurrentHour: Bool
 
     private var hourLabel: String {
@@ -346,7 +362,10 @@ private struct TimeBlockHourRow: View {
                         .padding(.top, 8)
                 } else {
                     ForEach(slots) { slot in
-                        TimeBlockReminderCard(slot: slot)
+                        switch slot {
+                        case .reminder(let reminderSlot):
+                            TimeBlockReminderCard(slot: reminderSlot)
+                        }
                     }
                 }
             }
@@ -360,6 +379,8 @@ private struct TimeBlockHourRow: View {
 // MARK: - Reminder card
 
 private struct TimeBlockReminderCard: View {
+    @Environment(\.modelContext) private var modelContext
+    
     let slot: ReminderSlot
 
     private var reminder: LureliaReminder { slot.reminder }
@@ -415,9 +436,20 @@ private struct TimeBlockReminderCard: View {
 
                     Spacer(minLength: 6)
 
-                    Circle()
-                        .strokeBorder(accent.opacity(0.75), lineWidth: 2)
-                        .frame(width: 22, height: 22)
+                    Button {
+                        Task {
+                            await ReminderActionManager.completeReminderOccurrence(
+                                reminder,
+                                in: modelContext
+                            )
+                        }
+                    } label: {
+                        Circle()
+                            .strokeBorder(accent.opacity(0.75), lineWidth: 2)
+                            .frame(width: 22, height: 22)
+                    }
+                    .buttonStyle(.plain)
+                    .disabled(isCompleted)
                 }
 
                 HStack(spacing: 6) {

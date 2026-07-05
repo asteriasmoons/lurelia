@@ -7,7 +7,6 @@ import SwiftUI
 import SwiftData
 
 struct LureliaCoinsView: View {
-    @Environment(\.dismiss) private var dismiss
     @Environment(\.modelContext) private var modelContext
     @Query private var settings: [UserSettings]
     @Query private var tasks: [LureliaTask]
@@ -15,11 +14,24 @@ struct LureliaCoinsView: View {
     @Query private var routineStats: [LureliaRoutineStats]
 
     @State private var appeared = false
-    @State private var coinBounce = false
+    @State private var starPulse = false
 
-    private let goldPrimary = Color(lureliaHex: "#d4a63c")
-    private let goldSoft = Color(lureliaHex: "#f1d38a")
-    private let goldDark = Color(lureliaHex: "#4a3412")
+    private let purplePrimary = Color(lureliaHex: "#6a1eff")
+    private let purpleMid = Color(lureliaHex: "#8b4cff")
+    private let purpleSoft = Color(lureliaHex: "#c7a3ff")
+    private let purpleDark = Color(lureliaHex: "#251044")
+
+    private var purpleGrad: LinearGradient {
+        LinearGradient(
+            colors: [
+                purplePrimary,
+                purpleMid,
+                purpleSoft
+            ],
+            startPoint: .topLeading,
+            endPoint: .bottomTrailing
+        )
+    }
 
     private var userSettings: UserSettings? {
         settings.first
@@ -115,7 +127,7 @@ struct LureliaCoinsView: View {
                 appeared = true
             }
 
-            coinBounce = true
+            starPulse = true
         }
     }
 
@@ -124,22 +136,10 @@ struct LureliaCoinsView: View {
     private var header: some View {
         HStack(alignment: .center, spacing: 12) {
             Text("Coins")
-                .font(.system(size: 30, weight: .bold, design: .rounded))
+                .font(.system(size: 30, weight: .black, design: .rounded))
                 .foregroundStyle(.white)
 
             Spacer()
-
-            Button {
-                dismiss()
-            } label: {
-                Image("xmarkwavy")
-                    .renderingMode(.template)
-                    .resizable()
-                    .scaledToFit()
-                    .frame(width: 28, height: 28)
-                    .foregroundStyle(LGradients.header)
-            }
-            .buttonStyle(.plain)
         }
         .padding(.horizontal, 24)
         .padding(.top, 59)
@@ -151,29 +151,27 @@ struct LureliaCoinsView: View {
     private var coinHero: some View {
         ZStack {
             Circle()
-                .fill(
-                    LinearGradient(
-                        colors: [
-                            goldSoft,
-                            goldPrimary
-                        ],
-                        startPoint: .topLeading,
-                        endPoint: .bottomTrailing
-                    )
-                )
-                .frame(width: 100, height: 100)
-                .shadow(color: goldPrimary.opacity(0.42), radius: 26)
+                .fill(purplePrimary.opacity(0.22))
+                .frame(width: 142, height: 142)
+                .blur(radius: 25)
+                .scaleEffect(starPulse ? 1.15 : 0.9)
+                .animation(.easeInOut(duration: 1.1).repeatForever(autoreverses: true), value: starPulse)
 
             Image("sparkle")
                 .renderingMode(.template)
                 .resizable()
                 .scaledToFit()
-                .frame(width: 44, height: 44)
-                .foregroundStyle(.white)
+                .frame(width: 92, height: 92)
+                .foregroundStyle(purpleGrad)
+                .shadow(color: purplePrimary.opacity(0.55), radius: 20, y: 8)
+                .scaleEffect(starPulse ? 1.08 : 0.94)
+                .animation(.easeInOut(duration: 1.1).repeatForever(autoreverses: true), value: starPulse)
         }
-        .scaleEffect(coinBounce ? 1.08 : 1.0)
-        .animation(.easeInOut(duration: 0.8).repeatForever(autoreverses: true), value: coinBounce)
+        .frame(maxWidth: .infinity)
+        .frame(height: 130)
+        .padding(.top, 8)
         .opacity(appeared ? 1 : 0)
+        .onAppear { starPulse = true }
     }
 
     // MARK: - Balance Card
@@ -183,14 +181,14 @@ struct LureliaCoinsView: View {
             VStack(spacing: 8) {
                 Text("Coin Balance")
                     .font(.system(size: 14, weight: .semibold, design: .rounded))
-                    .foregroundStyle(goldSoft.opacity(0.82))
+                .foregroundStyle(purpleSoft.opacity(0.82))
                     .textCase(.uppercase)
 
                 Text("\(balance)")
                     .font(.system(size: 56, weight: .bold, design: .rounded))
-                    .foregroundStyle(goldSoft)
+                .foregroundStyle(purpleSoft)
                     .monospacedDigit()
-                    .shadow(color: goldPrimary.opacity(0.30), radius: 12)
+                    .shadow(color: purplePrimary.opacity(0.30), radius: 12)
                     .scaleEffect(appeared ? 1 : 0.8)
                     .opacity(appeared ? 1 : 0)
             }
@@ -199,7 +197,7 @@ struct LureliaCoinsView: View {
                 LureliaCoinsStatCell(
                     label: "Earned",
                     value: "+\(earnedFromCompletedTasks)",
-                    color: Color(lureliaHex: "#ffe6a3")
+                    color: purplePrimary
                 )
 
                 Divider()
@@ -209,7 +207,7 @@ struct LureliaCoinsView: View {
                 LureliaCoinsStatCell(
                     label: "Tasks Done",
                     value: "\(tasksCompleted)",
-                    color: goldPrimary
+                    color: purplePrimary
                 )
 
                 Divider()
@@ -219,20 +217,20 @@ struct LureliaCoinsView: View {
                 LureliaCoinsStatCell(
                     label: "Possible",
                     value: "\(totalPossibleCoins)",
-                    color: Color(lureliaHex: "#ffe6a3")
+                    color: purplePrimary
                 )
             }
             .padding(.top, 4)
         }
         .padding(24)
-        .background(goldPrimary.opacity(0.07))
+        .background(purplePrimary.opacity(0.07))
         .clipShape(RoundedRectangle(cornerRadius: 24, style: .continuous))
         .overlay(
             RoundedRectangle(cornerRadius: 24, style: .continuous)
                 .stroke(
                     LinearGradient(
                         colors: [
-                            goldPrimary.opacity(0.55),
+                            purplePrimary.opacity(0.55),
                             LColors.gradientPurple.opacity(0.30)
                         ],
                         startPoint: .topLeading,
@@ -241,7 +239,7 @@ struct LureliaCoinsView: View {
                     lineWidth: 1
                 )
         )
-        .shadow(color: goldPrimary.opacity(0.16), radius: 18, x: 0, y: 8)
+        .shadow(color: purplePrimary.opacity(0.16), radius: 18, x: 0, y: 8)
         .padding(.horizontal, 24)
     }
 
@@ -254,28 +252,28 @@ struct LureliaCoinsView: View {
                     icon: "checkwavy",
                     label: "Complete a task",
                     amount: "Task reward",
-                    color: goldSoft
+                    color: purpleSoft
                 )
 
                 LureliaEarnRow(
                     icon: "starcal",
                     label: "Choose higher-effort tasks",
                     amount: "More coins",
-                    color: goldPrimary
+                    color: purplePrimary
                 )
 
                 LureliaEarnRow(
                     icon: "clockfill",
                     label: "Finish scheduled routines",
                     amount: "Coming soon",
-                    color: goldSoft
+                    color: purpleSoft
                 )
 
                 LureliaEarnRow(
                     icon: "flame",
                     label: "Build completion streaks",
                     amount: "Coming soon",
-                    color: goldPrimary
+                    color: purplePrimary
                 )
             }
         }
@@ -630,7 +628,7 @@ struct LureliaCoinsSectionCard<Content: View>: View {
         VStack(alignment: .leading, spacing: 14) {
             Text(title)
                 .font(.system(size: 13, weight: .semibold, design: .rounded))
-                .foregroundStyle(Color(lureliaHex: "#f1d38a").opacity(0.82))
+                .foregroundStyle(Color(lureliaHex: "#6a1eff").opacity(0.92))
                 .textCase(.uppercase)
 
             content
@@ -644,8 +642,8 @@ struct LureliaCoinsSectionCard<Content: View>: View {
                     LinearGradient(
                         colors: [
                             LColors.glassBorderStrong,
-                            Color(lureliaHex: "#d4a63c").opacity(0.18),
-                            LColors.gradientPurple.opacity(0.18)
+                            Color(lureliaHex: "#6a1eff").opacity(0.42),
+                            Color(lureliaHex: "#c7a3ff").opacity(0.24)
                         ],
                         startPoint: .topLeading,
                         endPoint: .bottomTrailing
@@ -692,13 +690,13 @@ struct LureliaEarnRow: View {
                     .font(.system(size: 12, weight: .bold, design: .rounded))
                     .monospacedDigit()
             }
-            .foregroundStyle(Color(lureliaHex: "#f1d38a"))
+            .foregroundStyle(Color(lureliaHex: "#6a1eff"))
             .padding(.horizontal, 9)
             .padding(.vertical, 6)
-            .background(Color(lureliaHex: "#4a3412").opacity(0.42), in: Capsule())
+            .background(Color(lureliaHex: "#251044").opacity(0.42), in: Capsule())
             .overlay(
                 Capsule()
-                    .strokeBorder(Color(lureliaHex: "#d4a63c").opacity(0.45), lineWidth: 1)
+                    .strokeBorder(Color(lureliaHex: "#6a1eff").opacity(0.45), lineWidth: 1)
             )
         }
         .padding(.vertical, 4)
@@ -714,7 +712,7 @@ struct LureliaRewardPlaceholderRow: View {
         HStack(spacing: 14) {
             ZStack {
                 Circle()
-                    .fill(Color(lureliaHex: "#d4a63c").opacity(0.10))
+                    .fill(Color(lureliaHex: "#6a1eff").opacity(0.10))
                     .frame(width: 40, height: 40)
 
                 Image("sparkle")
@@ -722,7 +720,7 @@ struct LureliaRewardPlaceholderRow: View {
                     .resizable()
                     .scaledToFit()
                     .frame(width: 17, height: 17)
-                    .foregroundStyle(Color(lureliaHex: "#f1d38a"))
+                    .foregroundStyle(Color(lureliaHex: "#6a1eff"))
             }
 
             VStack(alignment: .leading, spacing: 3) {
@@ -749,21 +747,21 @@ struct LureliaRewardPlaceholderRow: View {
                     .font(.system(size: 13, weight: .bold, design: .rounded))
                     .monospacedDigit()
             }
-            .foregroundStyle(Color(lureliaHex: "#f1d38a"))
+            .foregroundStyle(Color(lureliaHex: "#6a1eff"))
             .padding(.horizontal, 10)
             .padding(.vertical, 7)
-            .background(Color(lureliaHex: "#4a3412").opacity(0.42), in: Capsule())
+            .background(Color(lureliaHex: "#251044").opacity(0.42), in: Capsule())
             .overlay(
                 Capsule()
-                    .strokeBorder(Color(lureliaHex: "#d4a63c").opacity(0.45), lineWidth: 1)
+                    .strokeBorder(Color(lureliaHex: "#6a1eff").opacity(0.45), lineWidth: 1)
             )
         }
         .padding(14)
-        .background(Color(lureliaHex: "#d4a63c").opacity(0.05))
+        .background(Color(lureliaHex: "#6a1eff").opacity(0.05))
         .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
         .overlay(
             RoundedRectangle(cornerRadius: 14, style: .continuous)
-                .stroke(Color(lureliaHex: "#d4a63c").opacity(0.12), lineWidth: 1)
+                .stroke(Color(lureliaHex: "#6a1eff").opacity(0.12), lineWidth: 1)
         )
     }
 }

@@ -25,6 +25,7 @@ final class UserSettings {
     
     var autoClearTasks: Bool = false
     var notificationsEnabled: Bool = false
+    var hideCompletedReminders: Bool = false
     
     // MARK: - Coins
     
@@ -48,6 +49,7 @@ final class UserSettings {
         selectedStarterRoutines: [String] = [],
         autoClearTasks: Bool = false,
         notificationsEnabled: Bool = false,
+        hideCompletedReminders: Bool = false,
         coinBalance: Int = 0,
         profileImageData: Data? = nil
     ) {
@@ -56,6 +58,7 @@ final class UserSettings {
         self.selectedStarterRoutines = selectedStarterRoutines
         self.autoClearTasks = autoClearTasks
         self.notificationsEnabled = notificationsEnabled
+        self.hideCompletedReminders = hideCompletedReminders
         self.coinBalance = coinBalance
         self.createdAt = Date()
         self.updatedAt = Date()

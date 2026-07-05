@@ -18,6 +18,7 @@ struct ScheduleView: View {
 
     @State private var showCreateBoard = false
     @State private var showTimeBlockView = false
+    @State private var showKanbanTimeline = false
     @State private var selectedBoardWrapper: KanbanBoardWrapper?
     @State private var editingBoard: KanbanBoard?
 
@@ -32,7 +33,7 @@ struct ScheduleView: View {
                         // MARK: Header
                         HStack {
                             Text("Schedule")
-                                .font(.system(size: 30, weight: .bold, design: .rounded))
+                                .font(.system(size: 30, weight: .black, design: .rounded))
                                 .foregroundStyle(.white)
 
                             Spacer()
@@ -55,12 +56,30 @@ struct ScheduleView: View {
                         CalendarView()
                             .padding(.bottom, 4)
 
-                        Button {
-                            showTimeBlockView = true
-                        } label: {
-                            TimeBlockPreviewCard()
+                        HStack(spacing: 14) {
+                            Button {
+                                showTimeBlockView = true
+                            } label: {
+                                ScheduleSquareActionCard(
+                                    icon: "clockfill",
+                                    title: "Time Block",
+                                    subtitle: "Arrange today by time."
+                                )
+                            }
+                            .buttonStyle(.plain)
+
+                            Button {
+                                showKanbanTimeline = true
+                            } label: {
+                                ScheduleSquareActionCard(
+                                    icon: "clockwavy",
+                                    title: "Kanban Timeline",
+                                    subtitle: "View reminders by day."
+                                )
+                            }
+                            .buttonStyle(.plain)
                         }
-                        .buttonStyle(.plain)
+                        .padding(.horizontal, 24)
 
                         if boards.isEmpty {
                             emptyState
@@ -102,6 +121,9 @@ struct ScheduleView: View {
             }
             .fullScreenCover(isPresented: $showTimeBlockView) {
                 TimeBlockView()
+            }
+            .fullScreenCover(isPresented: $showKanbanTimeline) {
+                KanbanTimelineView()
             }
             .sheet(item: $editingBoard) { board in
                 CreateBoardView(board: board)
@@ -246,80 +268,57 @@ struct BoardRowCard: View {
     }
 }
 
-// MARK: - Time Block Preview Card
+// MARK: - Schedule Square Action Card
 
-struct TimeBlockPreviewCard: View {
+struct ScheduleSquareActionCard: View {
+    let icon: String
+    let title: String
+    let subtitle: String
+
     var body: some View {
-        HStack(spacing: 14) {
-            ZStack {
-                Circle()
-                    .fill(LColors.gradientPurple.opacity(0.16))
-                    .frame(width: 54, height: 54)
+        GlassCard {
+            VStack(spacing: 12) {
+                ZStack {
+                    Circle()
+                        .fill(Color.white.opacity(0.10))
+                        .frame(width: 54, height: 54)
 
-                Circle()
-                    .fill(LColors.gradientPurple.opacity(0.18))
-                    .frame(width: 38, height: 38)
-                    .blur(radius: 10)
+                    Circle()
+                        .strokeBorder(LGradients.header, lineWidth: 1.6)
+                        .frame(width: 54, height: 54)
 
-                Image("clockfill")
-                    .renderingMode(.template)
-                    .resizable()
-                    .scaledToFit()
-                    .frame(width: 26, height: 26)
-                    .foregroundStyle(LGradients.header)
-            }
+                    Circle()
+                        .fill(Color.white.opacity(0.10))
+                        .frame(width: 38, height: 38)
+                        .blur(radius: 10)
 
-            VStack(alignment: .leading, spacing: 4) {
-                Text("Time Block View")
-                    .font(.system(size: 17, weight: .black, design: .rounded))
-                    .foregroundStyle(LColors.textPrimary)
-
-                Text("See today’s reminders arranged by time.")
-                    .font(.system(size: 12, weight: .semibold, design: .rounded))
-                    .foregroundStyle(LColors.textSecondary)
-                    .lineLimit(2)
-            }
-
-            Spacer()
-
-            Image(systemName: "chevron.right")
-                .font(.system(size: 13, weight: .semibold))
-                .foregroundStyle(LColors.textSecondary)
-        }
-        .padding(16)
-        .background {
-            RoundedRectangle(cornerRadius: 22, style: .continuous)
-                .fill(LColors.glassSurface)
-                .overlay {
-                    RoundedRectangle(cornerRadius: 22, style: .continuous)
-                        .fill(
-                            LinearGradient(
-                                colors: [
-                                    LColors.gradientPurple.opacity(0.10),
-                                    Color.white.opacity(0.02)
-                                ],
-                                startPoint: .topLeading,
-                                endPoint: .bottomTrailing
-                            )
-                        )
+                    Image(icon)
+                        .renderingMode(.template)
+                        .resizable()
+                        .scaledToFit()
+                        .frame(width: 26, height: 26)
+                        .foregroundStyle(LGradients.header)
                 }
-                .overlay {
-                    RoundedRectangle(cornerRadius: 22, style: .continuous)
-                        .strokeBorder(
-                            LinearGradient(
-                                colors: [
-                                    LColors.gradientBlue.opacity(0.95),
-                                    LColors.gradientPurple.opacity(0.95),
-                                    Color.white.opacity(0.55)
-                                ],
-                                startPoint: .topLeading,
-                                endPoint: .bottomTrailing
-                            ),
-                            lineWidth: 1.4
-                        )
+
+                VStack(spacing: 5) {
+                    Text(title)
+                        .font(.system(size: 15, weight: .black, design: .rounded))
+                        .foregroundStyle(LColors.textPrimary)
+                        .multilineTextAlignment(.center)
+                        .lineLimit(2)
+
+                    Text(subtitle)
+                        .font(.system(size: 11, weight: .semibold, design: .rounded))
+                        .foregroundStyle(LColors.textSecondary)
+                        .multilineTextAlignment(.center)
+                        .lineLimit(2)
                 }
+
+                Spacer(minLength: 0)
+            }
+            .frame(maxWidth: .infinity)
+            .frame(height: 132)
         }
-        .padding(.horizontal, 24)
     }
 }
 

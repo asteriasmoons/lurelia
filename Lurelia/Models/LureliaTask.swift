@@ -24,6 +24,7 @@ final class LureliaTask {
     // MARK: - State
     
     var isCompleted: Bool = false
+    var isMarkedIncomplete: Bool = false
     var isActive: Bool = true
     var isSelectedToday: Bool = false
     var isCustom: Bool = false
@@ -98,18 +99,21 @@ extension LureliaTask {
     
     func markCompleted() {
         isCompleted = true
+        isMarkedIncomplete = false
         completedAt = Date()
         updatedAt = Date()
     }
     
     func markIncomplete() {
         isCompleted = false
+        isMarkedIncomplete = true
         completedAt = nil
         updatedAt = Date()
     }
     
     func toggleCompleted() {
         isCompleted.toggle()
+        isMarkedIncomplete = false
         
         completedAt = isCompleted ? Date() : nil
         updatedAt = Date()
@@ -117,6 +121,7 @@ extension LureliaTask {
     
     func resetForNewDay() {
         isCompleted = false
+        isMarkedIncomplete = false
         completedAt = nil
         isSelectedToday = false
         updatedAt = Date()

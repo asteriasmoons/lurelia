@@ -17,11 +17,11 @@ enum LureliaRoutineTimeOfDay: String, Codable, CaseIterable {
     var icon: String {
         switch self {
         case .morning:
-            return "sunrise.fill"
+            return "sun"
         case .afternoon:
-            return "sun.max.fill"
+            return "cloudie"
         case .evening:
-            return "moon.stars.fill"
+            return "moonzs"
         case .anytime:
             return "sparkle"
         }
@@ -40,10 +40,18 @@ final class LureliaRoutineTask {
     // MARK: - Core
     
     var title: String = ""
+    var icon: String = "sparkle"
     var notes: String = ""
     var sortOrder: Int = 0
     var createdAt: Date = Date()
     var updatedAt: Date = Date()
+    
+    // MARK: - State
+    
+    /// "pending" | "completed" | "skipped"
+    var state: String = "pending"
+    var completedAt: Date?
+    var skippedAt: Date?
     
     // MARK: - Bank Link
     
@@ -54,23 +62,57 @@ final class LureliaRoutineTask {
     
     var routine: LureliaRoutine?
     
+    // MARK: - Phase Link
+    
+    var phaseID: String?
+    
     // MARK: - Init
     
     init(
         title: String,
+        icon: String = "sparkle",
         notes: String = "",
         sortOrder: Int = 0,
         isFromBank: Bool = false,
         bankTaskID: String? = nil
     ) {
         self.title = title
+        self.icon = icon
         self.notes = notes
         self.sortOrder = sortOrder
+        self.state = "pending"
         self.createdAt = Date()
         self.updatedAt = Date()
         self.stableTaskID = bankTaskID ?? "routine-task::\(title.trimmingCharacters(in: .whitespacesAndNewlines).lowercased())::\(sortOrder)"
         self.isFromBank = isFromBank
         self.bankTaskID = bankTaskID
+    }
+    
+    // MARK: - Helpers
+    
+    var isPending: Bool { state == "pending" }
+    var isCompleted: Bool { state == "completed" }
+    var isSkipped: Bool { state == "skipped" }
+    
+    func markCompleted() {
+        state = "completed"
+        completedAt = Date()
+        skippedAt = nil
+        updatedAt = Date()
+    }
+    
+    func markSkipped() {
+        state = "skipped"
+        skippedAt = Date()
+        completedAt = nil
+        updatedAt = Date()
+    }
+    
+    func resetState() {
+        state = "pending"
+        completedAt = nil
+        skippedAt = nil
+        updatedAt = Date()
     }
 }
 
@@ -86,6 +128,7 @@ final class LureliaRoutineRunTask {
     // MARK: - Core
     
     var taskName: String = ""
+    var taskNotes: String = ""
     var sortOrder: Int = 0
     
     /// "pending" | "completed" | "skipped"
@@ -99,9 +142,11 @@ final class LureliaRoutineRunTask {
     
     init(
         name: String,
+        notes: String = "",
         sortOrder: Int
     ) {
         self.taskName = name
+        self.taskNotes = notes
         self.sortOrder = sortOrder
         self.sourceStableTaskID = ""
         self.state = "pending"
@@ -242,6 +287,13 @@ final class LureliaRoutine {
     var timeOfDay: LureliaRoutineTimeOfDay = LureliaRoutineTimeOfDay.morning
     var colorHex: String = "#7d19f7"
     
+    // MARK: - Enhanced Fields
+    
+    var purpose: String = ""
+    var descriptionText: String = ""
+    var principlesStorage: String = "[]"
+    var phasesEnabled: Bool = false
+    
     // MARK: - Schedule
     
     /// 1 = Sunday, 2 = Monday, 3 = Tuesday, 4 = Wednesday, 5 = Thursday, 6 = Friday, 7 = Saturday
@@ -252,19 +304,37 @@ final class LureliaRoutine {
     var endHour: Int = 8
     var endMinute: Int = 30
     var scheduleEnabled: Bool = false
+    var remindersEnabled: Bool = false
     var durationMode: Bool = false
     var durationMinutesOverride: Int = 30
     
     // MARK: - Notification IDs
+
+    var startReminderNotificationIDs: [String] = []
+    var halfwayReminderNotificationIDs: [String] = []
+    var endReminderNotificationIDs: [String] = []
     
-    var startNotificationIDs: [String] = []
-    var endNotificationIDs: [String] = []
+    // MARK: - Journey Links
+
+    var journeyID: UUID?
+    var journeyMilestoneID: UUID?
+    var journeyStepID: UUID?
+    var journeyTimelineItemID: UUID?
     
+    // MARK: - Practice Link
+    
+    var practiceID: String?
+
     // MARK: - Metadata
     
     var sortOrder: Int = 0
     var createdAt: Date = Date()
     var updatedAt: Date = Date()
+    
+    // MARK: - Direct Completion (no run required)
+    
+    var lastCompletedAt: Date?
+    var lastSkippedAt: Date?
     
     // MARK: - Relationships
     
@@ -273,6 +343,9 @@ final class LureliaRoutine {
     
     @Relationship(deleteRule: .cascade, inverse: \LureliaRoutineRun.routine)
     var runs: [LureliaRoutineRun]?
+    
+    @Relationship(deleteRule: .cascade, inverse: \LureliaRoutinePhase.routine)
+    var phases: [LureliaRoutinePhase]?
     
     // MARK: - Init
     
@@ -307,8 +380,9 @@ final class LureliaRoutine {
         self.durationMode = durationMode
         self.durationMinutesOverride = durationMinutesOverride
         
-        self.startNotificationIDs = []
-        self.endNotificationIDs = []
+        self.startReminderNotificationIDs = []
+        self.halfwayReminderNotificationIDs = []
+        self.endReminderNotificationIDs = []
         
         self.sortOrder = sortOrder
         self.createdAt = Date()
@@ -353,6 +427,77 @@ final class LureliaRoutine {
         (tasks ?? []).sorted { $0.sortOrder < $1.sortOrder }
     }
     
+    var sortedPhases: [LureliaRoutinePhase] {
+        (phases ?? []).sorted { $0.sortOrder < $1.sortOrder }
+    }
+    
+    var principles: [String] {
+        get {
+            guard let data = principlesStorage.data(using: .utf8),
+                  let decoded = try? JSONDecoder().decode([String].self, from: data) else {
+                return []
+            }
+            return decoded
+        }
+        set {
+            if let data = try? JSONEncoder().encode(newValue),
+               let string = String(data: data, encoding: .utf8) {
+                principlesStorage = string
+            }
+        }
+    }
+    
+    func tasksForPhase(_ phase: LureliaRoutinePhase) -> [LureliaRoutineTask] {
+        let phaseIDString = phase.id.uuidString
+        return sortedTasks.filter { $0.phaseID == phaseIDString }
+    }
+    
+    // MARK: - Direct Complete / Skip
+    
+    /// Completes the routine: all pending (non-skipped) tasks get marked completed.
+    func completeRoutine() {
+        for task in (tasks ?? []) where task.isPending {
+            task.markCompleted()
+        }
+        lastCompletedAt = Date()
+        updatedAt = Date()
+    }
+    
+    /// Skips the routine: all pending (non-completed) tasks get marked skipped.
+    func skipRoutine() {
+        for task in (tasks ?? []) where task.isPending {
+            task.markSkipped()
+        }
+        lastSkippedAt = Date()
+        updatedAt = Date()
+    }
+    
+    /// Resets all tasks to pending.
+    func resetTaskStates() {
+        for task in (tasks ?? []) {
+            task.resetState()
+        }
+        updatedAt = Date()
+    }
+    
+    var allTasksDone: Bool {
+        let allTasks = tasks ?? []
+        guard !allTasks.isEmpty else { return false }
+        return allTasks.allSatisfy { !$0.isPending }
+    }
+    
+    var completedTaskCount: Int {
+        (tasks ?? []).filter { $0.isCompleted }.count
+    }
+    
+    var skippedTaskCount: Int {
+        (tasks ?? []).filter { $0.isSkipped }.count
+    }
+    
+    var pendingTaskCount: Int {
+        (tasks ?? []).filter { $0.isPending }.count
+    }
+    
     var startDateComponents: DateComponents {
         DateComponents(
             hour: startHour,
@@ -379,6 +524,43 @@ final class LureliaRoutine {
         "\(formattedStartTime) - \(formattedEndTime)"
     }
     
+    var enabledReminderTimes: [LureliaRoutineReminderTime] {
+        [
+            LureliaRoutineReminderTime(
+                title: "Start Reminder",
+                hour: startHour,
+                minute: startMinute,
+                notificationIDs: startReminderNotificationIDs
+            ),
+            LureliaRoutineReminderTime(
+                title: "Halfway Reminder",
+                hour: halfwayReminderHour,
+                minute: halfwayReminderMinute,
+                notificationIDs: halfwayReminderNotificationIDs
+            ),
+            LureliaRoutineReminderTime(
+                title: "End Reminder",
+                hour: endHour,
+                minute: endMinute,
+                notificationIDs: endReminderNotificationIDs
+            )
+        ]
+    }
+    
+    private var halfwayReminderTotalMinutes: Int {
+        let startTotal = startHour * 60 + startMinute
+        let halfwayTotal = startTotal + (durationMinutes / 2)
+        return halfwayTotal % 1440
+    }
+
+    var halfwayReminderHour: Int {
+        halfwayReminderTotalMinutes / 60
+    }
+
+    var halfwayReminderMinute: Int {
+        halfwayReminderTotalMinutes % 60
+    }
+    
     private func formattedTime(hour: Int, minute: Int) -> String {
         var components = DateComponents()
         components.hour = hour
@@ -388,6 +570,26 @@ final class LureliaRoutine {
             return "\(hour):\(String(format: "%02d", minute))"
         }
         
+        return date.formatted(date: .omitted, time: .shortened)
+    }
+}
+
+struct LureliaRoutineReminderTime: Identifiable, Hashable {
+    let id = UUID()
+    var title: String
+    var hour: Int
+    var minute: Int
+    var notificationIDs: [String]
+
+    var formattedTime: String {
+        var components = DateComponents()
+        components.hour = hour
+        components.minute = minute
+
+        guard let date = Calendar.current.date(from: components) else {
+            return "\(hour):\(String(format: "%02d", minute))"
+        }
+
         return date.formatted(date: .omitted, time: .shortened)
     }
 }

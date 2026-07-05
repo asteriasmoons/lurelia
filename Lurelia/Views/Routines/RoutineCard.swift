@@ -39,6 +39,78 @@ struct RoutineCard: View {
         return "\(days)  \(routine.formattedTimeRange)"
     }
     
+    private var taskCount: Int {
+        (routine.tasks ?? []).count
+    }
+
+    private var phaseCount: Int {
+        routine.phasesEnabled ? routine.sortedPhases.count : 0
+    }
+
+    private var scheduleStatusText: String {
+        routine.scheduleEnabled && !routine.scheduledDays.isEmpty ? "Scheduled" : "Unscheduled"
+    }
+
+    private var weekdayPillText: String {
+        guard routine.scheduleEnabled && !routine.scheduledDays.isEmpty else {
+            return "None"
+        }
+
+        let symbols = Calendar.current.shortWeekdaySymbols
+
+        return routine.scheduledDays
+            .sorted()
+            .compactMap { weekday in
+                guard weekday >= 1 && weekday <= 7 else { return nil }
+                return String(symbols[weekday - 1].prefix(3))
+            }
+            .joined(separator: " ")
+    }
+    
+    private var taskPhaseText: String {
+        let taskWord = taskCount == 1 ? "Task" : "Tasks"
+        let phaseWord = phaseCount == 1 ? "Phase" : "Phases"
+
+        return "\(taskCount) \(taskWord) • \(phaseCount) \(phaseWord)"
+    }
+
+    private var weekdayDisplayText: String {
+        let days: [Int]
+
+        if routine.phasesEnabled {
+            days = Array(
+                Set(
+                    routine.sortedPhases
+                        .filter { $0.scheduleEnabled }
+                        .flatMap { $0.scheduledDays }
+                )
+            )
+            .sorted()
+        } else {
+            days = routine.scheduleEnabled ? routine.scheduledDays.sorted() : []
+        }
+
+        guard !days.isEmpty else {
+            return "No Schedule"
+        }
+        if Set(days) == Set(1...7) {
+            return "Daily"
+        }
+
+        let symbols = Calendar.current.shortWeekdaySymbols
+
+        return days
+            .compactMap { weekday in
+                guard weekday >= 1 && weekday <= 7 else { return nil }
+                return String(symbols[weekday - 1].prefix(3))
+            }
+            .joined(separator: " • ")
+    }
+
+    private var timeDisplayText: String {
+        "\(routine.formattedStartTime) – \(routine.formattedEndTime)"
+    }
+    
     var body: some View {
         HStack(spacing: 16) {
             ZStack {
@@ -60,30 +132,30 @@ struct RoutineCard: View {
             }
             .frame(width: 58, height: 58)
             
-            VStack(alignment: .leading, spacing: 6) {
+            VStack(alignment: .leading, spacing: 5) {
                 Text(routine.name)
-                    .font(.system(size: 16, weight: .bold, design: .rounded))
+                    .font(.system(size: 17, weight: .black, design: .rounded))
                     .foregroundStyle(LColors.textPrimary)
                     .lineLimit(1)
-                
-                HStack(spacing: 8) {
-                    Text("\((routine.tasks ?? []).count) tasks")
-                        .font(.caption)
-                        .foregroundStyle(LColors.textSecondary)
-                    
-                    Text("·")
-                        .foregroundStyle(LColors.textSecondary.opacity(0.45))
-                    
-                    Text(scheduleLabel)
-                        .font(.caption)
-                        .foregroundStyle(LColors.textSecondary)
-                        .lineLimit(1)
-                }
-                
+
+                Text(taskPhaseText)
+                    .font(.system(size: 12, weight: .semibold, design: .rounded))
+                    .foregroundStyle(LColors.textSecondary.opacity(0.9))
+                    .lineLimit(1)
+
+                Text(weekdayDisplayText)
+                    .font(.system(size: 12, weight: .bold, design: .rounded))
+                    .foregroundStyle(routineTint)
+                    .lineLimit(1)
+
+                Text(timeDisplayText)
+                    .font(.system(size: 12, weight: .semibold, design: .rounded))
+                    .foregroundStyle(LColors.textSecondary.opacity(0.85))
+                    .lineLimit(1)
+
                 if isActive {
                     Text(isPaused ? "Paused" : "In progress")
-                        .font(.caption2)
-                        .fontWeight(.semibold)
+                        .font(.system(size: 10, weight: .black, design: .rounded))
                         .foregroundStyle(routineTint)
                         .padding(.horizontal, 8)
                         .padding(.vertical, 4)
@@ -101,7 +173,7 @@ struct RoutineCard: View {
                 Button {
                     onEdit()
                 } label: {
-                    Image("slider")
+                    Image("settings")
                         .renderingMode(.template)
                         .resizable()
                         .scaledToFit()
@@ -218,5 +290,29 @@ struct RoutineCard: View {
                 }
         }
         .shadow(color: routineTint.opacity(0.13), radius: 14, x: 0, y: 7)
+    }
+    private func routineInfoPill(title: String, subtitle: String) -> some View {
+        VStack(spacing: 1) {
+            Text(title)
+                .font(.system(size: 10, weight: .black, design: .rounded))
+                .foregroundStyle(LColors.textPrimary)
+                .lineLimit(1)
+                .minimumScaleFactor(0.75)
+
+            Text(subtitle.uppercased())
+                .font(.system(size: 7, weight: .black, design: .rounded))
+                .foregroundStyle(LColors.textSecondary.opacity(0.75))
+                .lineLimit(1)
+        }
+        .padding(.horizontal, 8)
+        .padding(.vertical, 6)
+        .background(
+            routineTint.opacity(0.18),
+            in: Capsule()
+        )
+        .overlay {
+            Capsule()
+                .strokeBorder(routineTint.opacity(0.45), lineWidth: 1)
+        }
     }
 }

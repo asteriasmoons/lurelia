@@ -66,11 +66,11 @@ struct DailyTaskPickerView: View {
         case "Health":
             return ("health", "Medication, hydration, sleep, and body care")
         case "Fitness":
-            return ("dumbbell", "Movement, stretching, exercise, and physical strength")
+            return ("weight", "Movement, stretching, exercise, and physical strength")
         case "Home":
             return ("houseoutline", "Cleaning, meals, chores, and home maintenance")
         case "Work":
-            return ("briefcase.fill", "Work tasks, focus sessions, and admin upkeep")
+            return ("casemagic", "Work tasks, focus sessions, and admin upkeep")
         case "Study":
             return ("book.fill", "Lessons, notes, review, and learning sessions")
         case "Care":
@@ -113,7 +113,7 @@ struct DailyTaskPickerView: View {
                 VStack(spacing: 8) {
                     HStack {
                         Text(isAddingMore ? "Add More Tasks" : "Choose Tasks")
-                            .font(.system(size: 22, weight: .bold, design: .rounded))
+                            .font(.system(size: 22, weight: .black, design: .rounded))
                             .foregroundStyle(.white)
                         
                         Spacer()
@@ -201,99 +201,86 @@ struct DailyTaskPickerView: View {
                         ForEach(currentCategoryTasks) { task in
                             let isSelected = selectedTaskIDs.contains(task.id)
                             
-                            HStack(spacing: 14) {
-                                ZStack {
-                                    Circle()
-                                        .fill(
-                                            isSelected
-                                            ? AnyShapeStyle(LGradients.header)
-                                            : AnyShapeStyle(Color.clear)
-                                        )
-                                        .frame(width: 26, height: 26)
-                                        .overlay(
-                                            Circle()
-                                                .stroke(
-                                                    isSelected ? Color.clear : Color.white.opacity(0.3),
-                                                    lineWidth: 1.5
-                                                )
-                                        )
+                            GlassCard {
+                                HStack(spacing: 14) {
+                                    ZStack {
+                                        Circle()
+                                            .fill(
+                                                isSelected
+                                                ? AnyShapeStyle(LGradients.header)
+                                                : AnyShapeStyle(Color.clear)
+                                            )
+                                            .frame(width: 26, height: 26)
+                                            .overlay(
+                                                Circle()
+                                                    .stroke(
+                                                        isSelected ? Color.clear : Color.white.opacity(0.3),
+                                                        lineWidth: 1.5
+                                                    )
+                                            )
+                                        
+                                        if isSelected {
+                                            Image("checkwavy")
+                                                .renderingMode(.template)
+                                                .resizable()
+                                                .scaledToFit()
+                                                .frame(width: 10, height: 10)
+                                                .foregroundStyle(.white)
+                                        }
+                                    }
                                     
-                                    if isSelected {
-                                        Image("checkwavy")
-                                            .renderingMode(.template)
-                                            .resizable()
-                                            .scaledToFit()
-                                            .frame(width: 10, height: 10)
+                                    VStack(alignment: .leading, spacing: 4) {
+                                        Text(task.title)
+                                            .font(.system(size: 14, weight: .medium, design: .rounded))
                                             .foregroundStyle(.white)
-                                    }
-                                }
-                                
-                                VStack(alignment: .leading, spacing: 4) {
-                                    Text(task.title)
-                                        .font(.system(size: 14, weight: .medium, design: .rounded))
-                                        .foregroundStyle(.white)
-                                        .multilineTextAlignment(.leading)
-                                    
-                                    if let notes = task.notes, !notes.isEmpty {
-                                        Text(notes)
-                                            .font(.system(size: 12, design: .rounded))
-                                            .foregroundStyle(.white.opacity(0.45))
-                                            .lineLimit(2)
                                             .multilineTextAlignment(.leading)
+                                        
+                                        if let notes = task.notes, !notes.isEmpty {
+                                            Text(notes)
+                                                .font(.system(size: 12, design: .rounded))
+                                                .foregroundStyle(.white.opacity(0.45))
+                                                .lineLimit(2)
+                                                .multilineTextAlignment(.leading)
+                                        }
+                                        
+                                        Text(task.category)
+                                            .font(.system(size: 10, weight: .semibold, design: .rounded))
+                                            .foregroundStyle(LColors.gradientBlue)
+                                            .padding(.horizontal, 7)
+                                            .padding(.vertical, 3)
+                                            .background(LColors.gradientBlue.opacity(0.12))
+                                            .clipShape(Capsule())
                                     }
                                     
-                                    Text(task.category)
-                                        .font(.system(size: 10, weight: .semibold, design: .rounded))
-                                        .foregroundStyle(LColors.gradientBlue)
-                                        .padding(.horizontal, 7)
-                                        .padding(.vertical, 3)
-                                        .background(LColors.gradientBlue.opacity(0.12))
-                                        .clipShape(Capsule())
-                                }
-                                
-                                Spacer(minLength: 8)
+                                    Spacer(minLength: 8)
 
-                                if task.coinReward > 0 {
-                                    HStack(spacing: 4) {
-                                        Image("sparkle")
-                                            .renderingMode(.template)
-                                            .resizable()
-                                            .scaledToFit()
-                                            .frame(width: 10, height: 10)
+                                    if task.coinReward > 0 {
+                                        HStack(spacing: 4) {
+                                            Image("sparkle")
+                                                .renderingMode(.template)
+                                                .resizable()
+                                                .scaledToFit()
+                                                .frame(width: 10, height: 10)
 
-                                        Text("+\(task.coinReward)")
-                                            .font(.system(size: 11, weight: .black, design: .rounded))
-                                            .monospacedDigit()
+                                            Text("+\(task.coinReward)")
+                                                .font(.system(size: 11, weight: .black, design: .rounded))
+                                                .monospacedDigit()
+                                        }
+                                        .foregroundStyle(Color(lureliaHex: "#f1d38a"))
+                                        .padding(.horizontal, 8)
+                                        .frame(height: 24)
+                                        .background(
+                                            Capsule()
+                                                .fill(Color(lureliaHex: "#4a3412").opacity(0.42))
+                                        )
+                                        .overlay(
+                                            Capsule()
+                                                .strokeBorder(Color(lureliaHex: "#d4a63c").opacity(0.55), lineWidth: 1)
+                                        )
                                     }
-                                    .foregroundStyle(Color(lureliaHex: "#f1d38a"))
-                                    .padding(.horizontal, 8)
-                                    .frame(height: 24)
-                                    .background(
-                                        Capsule()
-                                            .fill(Color(lureliaHex: "#4a3412").opacity(0.42))
-                                    )
-                                    .overlay(
-                                        Capsule()
-                                            .strokeBorder(Color(lureliaHex: "#d4a63c").opacity(0.55), lineWidth: 1)
-                                    )
                                 }
                             }
-                            .padding(14)
-                            .background(
-                                isSelected
-                                ? LColors.gradientBlue.opacity(0.15)
-                                : Color.white.opacity(0.06)
-                            )
-                            .clipShape(RoundedRectangle(cornerRadius: 14))
-                            .overlay(
-                                RoundedRectangle(cornerRadius: 14)
-                                    .stroke(
-                                        isSelected
-                                        ? LColors.gradientBlue.opacity(0.5)
-                                        : Color.white.opacity(0.08),
-                                        lineWidth: 1
-                                    )
-                            )
+                            
                             .contentShape(RoundedRectangle(cornerRadius: 14))
                             .onTapGesture {
                                 withAnimation(.spring(duration: 0.2)) {

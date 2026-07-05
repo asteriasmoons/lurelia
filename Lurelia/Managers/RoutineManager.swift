@@ -7,6 +7,7 @@ import Foundation
 import Combine
 import UserNotifications
 import SwiftData
+import WidgetKit
 
 @MainActor
 final class RoutineManager: ObservableObject {
@@ -14,12 +15,43 @@ final class RoutineManager: ObservableObject {
     
     private init() {}
     
+    // MARK: - Daily Reset
+
+    /// Resets all routine tasks to pending if the routine was last touched on a previous calendar day.
+    /// Call on app launch and when returning to foreground.
+    func resetRoutinesIfNewDay(context: ModelContext) {
+        let calendar = Calendar.current
+        let today = Date()
+
+        let descriptor = FetchDescriptor<LureliaRoutine>()
+        guard let allRoutines = try? context.fetch(descriptor) else { return }
+
+        var didModify = false
+        for r in allRoutines {
+            if !calendar.isDate(r.updatedAt, inSameDayAs: today) {
+                if r.allTasksDone || (r.tasks ?? []).contains(where: { !$0.isPending }) {
+                    r.resetTaskStates()
+                    r.updatedAt = today
+                    didModify = true
+                }
+            }
+        }
+
+        if didModify {
+            try? context.save()
+            WidgetCenter.shared.reloadTimelines(ofKind: "LureliaDueRoutinesWidget")
+        }
+    }
+
     // MARK: - Run a Routine
     
     func startRun(
         for routine: LureliaRoutine,
         context: ModelContext
     ) -> LureliaRoutineRun {
+        
+        // Reset any stale routines before starting a new run
+        resetRoutinesIfNewDay(context: context)
         
         // Keep active session alive if already running
         if let existing = (routine.runs ?? []).first(where: { $0.endedAt == nil }) {
@@ -45,7 +77,8 @@ final class RoutineManager: ObservableObject {
         for (index, task) in routine.sortedTasks.enumerated() {
             let runTask = LureliaRoutineRunTask(
                 name: task.title,
-                sortOrder: index
+                notes: task.notes,
+                sortOrder: task.sortOrder
             )
 
             context.insert(runTask)
@@ -60,6 +93,66 @@ final class RoutineManager: ObservableObject {
             try context.save()
         } catch {
             print("[RoutineManager] Failed saving new routine run: \(error)")
+        }
+
+        LureliaLiveActivityBridge.shared.start(
+            routine: routine,
+            run: run
+        )
+
+        return run
+    }
+    
+    // MARK: - RUN PHASE ROUTINE
+    func startPhaseRun(
+        for routine: LureliaRoutine,
+        phase: LureliaRoutinePhase,
+        context: ModelContext
+    ) -> LureliaRoutineRun {
+
+        if let existing = (routine.runs ?? []).first(where: { $0.endedAt == nil }) {
+            LureliaLiveActivityBridge.shared.update(
+                routine: routine,
+                run: existing
+            )
+
+            return existing
+        }
+
+        let run = LureliaRoutineRun(routine: routine)
+
+        run.routineName = phase.name.isEmpty ? routine.name : phase.name
+        run.routineIcon = phase.icon
+        run.routineColorHex = routine.colorHex
+        run.routineTimeOfDayRaw = routine.timeOfDay.rawValue
+
+        context.insert(run)
+
+        let phaseTasks = routine.tasksForPhase(phase)
+
+        for (index, task) in phaseTasks.enumerated() {
+            let runTask = LureliaRoutineRunTask(
+                name: task.title,
+                notes: task.notes,
+                sortOrder: task.sortOrder
+            )
+
+            runTask.sourceStableTaskID = task.stableTaskID
+
+            context.insert(runTask)
+            runTask.run = run
+
+            if run.tasks == nil {
+                run.tasks = []
+            }
+
+            run.tasks?.append(runTask)
+        }
+
+        do {
+            try context.save()
+        } catch {
+            print("[RoutineManager] Failed saving new phase run: \(error)")
         }
 
         LureliaLiveActivityBridge.shared.start(
@@ -110,8 +203,18 @@ final class RoutineManager: ObservableObject {
         guard !run.isPaused else { return }
         
         runTask.state = "completed"
+
+        let sourceStableTaskID = runTask.sourceStableTaskID
+
+        if let sourceTask = routine.sortedTasks.first(where: { $0.stableTaskID == sourceStableTaskID }) {
+            sourceTask.markCompleted()
+        }
+
+        routine.updatedAt = Date()
+
         do {
             try runTask.modelContext?.save()
+            WidgetCenter.shared.reloadTimelines(ofKind: "LureliaDueRoutinesWidget")
         } catch {
             print("[RoutineManager] Failed saving completed routine task: \(error)")
         }
@@ -138,8 +241,18 @@ final class RoutineManager: ObservableObject {
         guard !run.isPaused else { return }
         
         runTask.state = "skipped"
+
+        let sourceStableTaskID = runTask.sourceStableTaskID
+
+        if let sourceTask = routine.sortedTasks.first(where: { $0.stableTaskID == sourceStableTaskID }) {
+            sourceTask.markSkipped()
+        }
+
+        routine.updatedAt = Date()
+
         do {
             try runTask.modelContext?.save()
+            WidgetCenter.shared.reloadTimelines(ofKind: "LureliaDueRoutinesWidget")
         } catch {
             print("[RoutineManager] Failed saving skipped routine task: \(error)")
         }
@@ -229,97 +342,98 @@ final class RoutineManager: ObservableObject {
         context.insert(stats)
         return stats
     }
+    
+    // MARK: - Permanent Routine Shutdown
+
+    func deleteAndStopAllRoutinesForever(context: ModelContext) async {
+        let center = UNUserNotificationCenter.current()
+
+        let routineDescriptor = FetchDescriptor<LureliaRoutine>()
+        let reminderDescriptor = FetchDescriptor<LureliaReminder>()
+
+        let routines = (try? context.fetch(routineDescriptor)) ?? []
+        let reminders = (try? context.fetch(reminderDescriptor)) ?? []
+
+        let routineReminders = reminders.filter { $0.kind == .routine }
+
+        let pendingRequests = await center.pendingNotificationRequests()
+        let routinePendingIDs = pendingRequests
+            .filter {
+                $0.content.categoryIdentifier == "routine" ||
+                $0.content.threadIdentifier.hasPrefix("routine-") ||
+                $0.identifier.contains("-start-wd") ||
+                $0.identifier.contains("-halfway-wd") ||
+                $0.identifier.contains("-end-wd")
+            }
+            .map(\.identifier)
+
+        let deliveredNotifications = await center.deliveredNotifications()
+        let routineDeliveredIDs = deliveredNotifications
+            .filter {
+                $0.request.content.categoryIdentifier == "routine" ||
+                $0.request.content.threadIdentifier.hasPrefix("routine-") ||
+                $0.request.identifier.contains("-start-wd") ||
+                $0.request.identifier.contains("-halfway-wd") ||
+                $0.request.identifier.contains("-end-wd")
+            }
+            .map { $0.request.identifier }
+
+        center.removePendingNotificationRequests(withIdentifiers: routinePendingIDs)
+        center.removeDeliveredNotifications(withIdentifiers: routineDeliveredIDs)
+
+        for routine in routines {
+            await cancelNotifications(for: routine)
+
+            routine.remindersEnabled = false
+            routine.scheduledDays = []
+            routine.startReminderNotificationIDs = []
+            routine.halfwayReminderNotificationIDs = []
+            routine.endReminderNotificationIDs = []
+
+            context.delete(routine)
+        }
+
+        for reminder in routineReminders {
+            LureliaNotificationManager.shared.cancelReminder(reminder)
+            context.delete(reminder)
+        }
+
+        do {
+            try context.save()
+            WidgetCenter.shared.reloadTimelines(ofKind: "LureliaDueRoutinesWidget")
+            WidgetCenter.shared.reloadTimelines(ofKind: "LureliaDueRemindersWidget")
+            print("✅ Deleted all routines and stopped routine schedules forever.")
+        } catch {
+            print("❌ Failed deleting routines forever: \(error)")
+        }
+    }
+    
+    func deleteAllRoutineNotifications(context: ModelContext) async {
+        guard let routines = try? context.fetch(FetchDescriptor<LureliaRoutine>()) else {
+            return
+        }
+
+        for routine in routines {
+            await LureliaNotificationManager.shared.cancelRoutine(routine)
+        }
+
+        print("🧹 Deleted all routine notifications.")
+    }
 
     // MARK: - Notifications
     
     func scheduleNotifications(
         for routine: LureliaRoutine
     ) async {
-        
         await cancelNotifications(for: routine)
-        
-        guard routine.scheduleEnabled else { return }
-        guard !routine.scheduledDays.isEmpty else { return }
-        
-        var startIDs: [String] = []
-        var endIDs: [String] = []
-        
-        for weekday in routine.scheduledDays {
-            
-            let startID = "\(routine.persistentModelID.hashValue)-start-wd\(weekday)"
-            let endID = "\(routine.persistentModelID.hashValue)-end-wd\(weekday)"
-            
-            startIDs.append(startID)
-            endIDs.append(endID)
-            
-            var startComps = DateComponents()
-            startComps.weekday = weekday
-            startComps.hour = routine.startHour
-            startComps.minute = routine.startMinute
-            
-            var endComps = DateComponents()
-            endComps.weekday = weekday
-            endComps.hour = routine.endHour
-            endComps.minute = routine.endMinute
-            
-            // MARK: - Start Notification
-            
-            let startContent = UNMutableNotificationContent()
-            startContent.title = routine.name
-            startContent.body = "Your \(routine.timeOfDay.rawValue.lowercased()) routine starts now."
-            startContent.sound = .default
-            
-            startContent.userInfo = [
-                "type": "routine",
-                "routineID": routine.persistentModelID.hashValue
-            ]
-            
-            // MARK: - End Notification
-            
-            let endContent = UNMutableNotificationContent()
-            endContent.title = routine.name
-            endContent.body = "Time's up on your \(routine.timeOfDay.rawValue.lowercased()) routine."
-            endContent.sound = .default
-            
-            endContent.userInfo = [
-                "type": "routine",
-                "routineID": routine.persistentModelID.hashValue
-            ]
-            
-            let startRequest = UNNotificationRequest(
-                identifier: startID,
-                content: startContent,
-                trigger: UNCalendarNotificationTrigger(
-                    dateMatching: startComps,
-                    repeats: true
-                )
-            )
-            
-            let endRequest = UNNotificationRequest(
-                identifier: endID,
-                content: endContent,
-                trigger: UNCalendarNotificationTrigger(
-                    dateMatching: endComps,
-                    repeats: true
-                )
-            )
-            
-            do {
-                try await UNUserNotificationCenter.current()
-                    .add(startRequest)
-                
-                try await UNUserNotificationCenter.current()
-                    .add(endRequest)
-                
-            } catch {
-                print(
-                    "[RoutineManager] Failed scheduling weekday \(weekday): \(error)"
-                )
-            }
-        }
-        
-        routine.startNotificationIDs = startIDs
-        routine.endNotificationIDs = endIDs
+
+        routine.remindersEnabled = false
+        routine.scheduledDays = []
+        routine.startReminderNotificationIDs = []
+        routine.halfwayReminderNotificationIDs = []
+        routine.endReminderNotificationIDs = []
+
+        print("[RoutineManager] Routine scheduling is permanently disabled.")
     }
     
     func cancelNotifications(
@@ -329,11 +443,13 @@ final class RoutineManager: ObservableObject {
         UNUserNotificationCenter.current()
             .removePendingNotificationRequests(
                 withIdentifiers:
-                    routine.startNotificationIDs
-                    + routine.endNotificationIDs
+                    routine.startReminderNotificationIDs
+                    + routine.halfwayReminderNotificationIDs
+                    + routine.endReminderNotificationIDs
             )
         
-        routine.startNotificationIDs = []
-        routine.endNotificationIDs = []
+        routine.startReminderNotificationIDs = []
+        routine.halfwayReminderNotificationIDs = []
+        routine.endReminderNotificationIDs = []
     }
 }

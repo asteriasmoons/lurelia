@@ -14,5 +14,7 @@ struct LureliaWidgetsBundle: WidgetBundle {
         LureliaWidgets()
         LureliaWidgetsControl()
         LureliaWidgetsLiveActivity()
+        LureliaDueRemindersWidget()
+        LureliaHabitsWidget()
     }
 }

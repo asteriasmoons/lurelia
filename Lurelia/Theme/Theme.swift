@@ -104,6 +104,12 @@ enum LGradients {
         startRadius: 0,
         endRadius: 260
     )
+
+    static let reward = LinearGradient(
+        colors: [Color(lureliaHex: "#FF1493"), Color(lureliaHex: "#FFB8EC")],
+        startPoint: .leading,
+        endPoint: .trailing
+    )
 }
 
 // MARK: - Spacing & Radius
@@ -160,5 +166,19 @@ extension Color {
         var r: CGFloat = 0, g: CGFloat = 0, b: CGFloat = 0, a: CGFloat = 0
         guard ui.getRed(&r, green: &g, blue: &b, alpha: &a) else { return nil }
         return String(format: "#%02X%02X%02X", Int(r * 255), Int(g * 255), Int(b * 255))
+    }
+
+    var isLightColor: Bool {
+        let uiColor = UIColor(self)
+        var red: CGFloat = 0
+        var green: CGFloat = 0
+        var blue: CGFloat = 0
+        var alpha: CGFloat = 0
+
+        uiColor.getRed(&red, green: &green, blue: &blue, alpha: &alpha)
+
+        let luminance = (0.299 * red) + (0.587 * green) + (0.114 * blue)
+
+        return luminance > 0.62
     }
 }

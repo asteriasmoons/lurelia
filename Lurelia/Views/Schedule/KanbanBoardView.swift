@@ -52,13 +52,14 @@ struct KanbanBoardView: View {
     }
 
     var body: some View {
+        NavigationStack {
         ZStack {
             LureliaBackgroundAlt()
 
             VStack(spacing: 0) {
                 HStack {
                     Text(board.name)
-                        .font(.system(size: 30, weight: .bold, design: .rounded))
+                        .font(.system(size: 30, weight: .black, design: .rounded))
                         .foregroundStyle(.white)
 
                     Spacer()
@@ -79,7 +80,7 @@ struct KanbanBoardView: View {
                 }
                 .padding(.horizontal, 24)
                 .padding(.top, 59)
-                .padding(.bottom, 16)
+                .padding(.bottom, 4)
 
                 if board.sortedColumns.isEmpty {
                     emptyState.padding(.top, 40)
@@ -127,7 +128,9 @@ struct KanbanBoardView: View {
                             }
                             .buttonStyle(.plain)
                         }
-                        .padding(.horizontal, 20).padding(.vertical, 16).padding(.bottom, 120)
+                        .padding(.horizontal, 20)
+                        .padding(.top, 4)
+                        .padding(.bottom, 120)
                     }
                 }
 
@@ -150,6 +153,12 @@ struct KanbanBoardView: View {
             AddReminderView(onCreated: { reminder in
                 pinCard(type: .reminder, itemID: reminder.id.uuidString, in: req.column)
             })
+        }
+        .navigationDestination(for: UUID.self) { reminderID in
+            if let reminder = allReminders.first(where: { $0.id == reminderID }) {
+                ReminderDetailView(reminder: reminder)
+               }
+            }
         }
     }
 
@@ -266,10 +275,29 @@ struct KanbanColumnView: View {
             Button { onEditColumn() } label: {
                 Label("Edit Column", systemImage: "pencil")
             }
+
+            Divider()
+
+            Button(role: .destructive) {
+                deleteColumn()
+            } label: {
+                Label("Delete Column", systemImage: "trash")
+            }
         }
     }
 
     private func deleteCard(_ card: KanbanCard) { modelContext.delete(card); try? modelContext.save() }
+    
+    private func deleteColumn() {
+        if let cards = column.cards {
+            for card in cards {
+                modelContext.delete(card)
+            }
+        }
+
+        modelContext.delete(column)
+        try? modelContext.save()
+    }
 
     private func availableMoveColumns(for card: KanbanCard) -> [KanbanColumn] {
         column.board?.sortedColumns.filter { $0.id != column.id } ?? []
@@ -301,7 +329,15 @@ struct KanbanItemCard: View {
     var body: some View {
         if card.cardType == .reminder,
            let reminder = allReminders.first(where: { $0.id.uuidString == card.itemID }) {
-            KanbanReminderCard(reminder: reminder, accent: columnAccent, onDelete: onDelete, onComplete: onComplete)
+            NavigationLink(value: reminder.id) {
+                KanbanReminderCard(
+                    reminder: reminder,
+                    accent: columnAccent,
+                    onDelete: onDelete,
+                    onComplete: onComplete
+                )
+            }
+            .buttonStyle(.plain)
         } else {
             orphanCard
         }
@@ -677,153 +713,23 @@ struct KanbanReminderCard: View {
 
     private func completeReminderOccurrence() {
         Task {
-            await LureliaNotificationManager.shared.cancelReminder(reminder)
-            withAnimation(.spring(response: 0.28, dampingFraction: 0.78)) {
-                reminder.updatedAt = Date()
-                let completedAt = reminder.nextFireAt ?? reminder.scheduledDate
-                var timestamps = reminder.completionTimestamps
-                timestamps.append(completedAt)
-                reminder.completionTimestamps = timestamps
+            await ReminderActionManager.completeReminderOccurrence(
+                reminder,
+                in: modelContext
+            )
 
-                if reminder.repeatUnit != .none, let next = nextScheduledDate(after: completedAt) {
-                    reminder.nextFireAt = next
-                    if !Calendar.current.isDate(next, inSameDayAs: reminder.scheduledDate) {
-                        reminder.scheduledDate = primaryFireDate(onSameDayAs: next)
-                    }
-                } else {
-                    reminder.isCompleted = true
-                    reminder.completedAt = Date()
-                }
+            await MainActor.run {
+                onComplete?()
             }
-            try? modelContext.save()
-            if reminder.repeatUnit != .none && reminder.isEnabled {
-                await LureliaNotificationManager.shared.scheduleReminder(reminder)
-            }
-            await MainActor.run { onComplete?() }
         }
     }
 
     private func skipReminderOccurrence() {
         Task {
-            await LureliaNotificationManager.shared.cancelReminder(reminder)
-            withAnimation(.spring(response: 0.28, dampingFraction: 0.78)) {
-                reminder.updatedAt = Date()
-                let skippedAt = reminder.nextFireAt ?? reminder.scheduledDate
-                var timestamps = reminder.skippedTimestamps
-                timestamps.append(skippedAt)
-                reminder.skippedTimestamps = timestamps
-
-                if let next = nextScheduledDate(after: skippedAt) {
-                    reminder.nextFireAt = next
-                    if !Calendar.current.isDate(next, inSameDayAs: reminder.scheduledDate) {
-                        reminder.scheduledDate = primaryFireDate(onSameDayAs: next)
-                    }
-                } else {
-                    reminder.isEnabled = false
-                }
-            }
-            try? modelContext.save()
-            if reminder.isEnabled {
-                await LureliaNotificationManager.shared.scheduleReminder(reminder)
-            }
-        }
-    }
-
-    private func primaryFireDate(onSameDayAs date: Date) -> Date {
-        let cal = Calendar.current
-        var day = cal.dateComponents([.year, .month, .day], from: date)
-        let time = cal.dateComponents([.hour, .minute, .second], from: reminder.scheduledDate)
-        day.hour = time.hour
-        day.minute = time.minute
-        day.second = time.second ?? 0
-        return cal.date(from: day) ?? date
-    }
-
-    private func nextScheduledDate(after date: Date) -> Date? {
-        let calendar = Calendar.current
-        let allTodayFires = allFireTimesOnSameDay(as: reminder.scheduledDate, using: calendar)
-        if let nextToday = allTodayFires.filter({ $0 > date }).min() { return nextToday }
-        return nextOccurrenceAfter(date: date, calendar: calendar)
-    }
-
-    private func allFireTimesOnSameDay(as refDate: Date, using calendar: Calendar) -> [Date] {
-        let dayComponents = calendar.dateComponents([.year, .month, .day], from: refDate)
-        let times = resolvedTimesOfDay()
-
-        return times.compactMap { timeStr -> Date? in
-            let parts = timeStr.split(separator: ":")
-            guard parts.count == 2, let h = Int(parts[0]), let m = Int(parts[1]) else { return nil }
-            var c = dayComponents
-            c.hour = h
-            c.minute = m
-            c.second = 0
-            return calendar.date(from: c)
-        }.sorted()
-    }
-
-    private func nextOccurrenceAfter(date: Date, calendar: Calendar) -> Date? {
-        let interval = max(1, reminder.repeatInterval)
-        var next = reminder.scheduledDate
-
-        func earliestFireOn(_ d: Date) -> Date? {
-            allFireTimesOnSameDay(as: d, using: calendar).filter { $0 > date }.min()
-        }
-
-        switch reminder.repeatUnit {
-        case .minutes:
-            repeat {
-                guard let d = calendar.date(byAdding: .minute, value: interval, to: next) else { return nil }
-                next = d
-            } while next <= date
-            return next
-
-        case .hours:
-            repeat {
-                guard let d = calendar.date(byAdding: .hour, value: interval, to: next) else { return nil }
-                next = d
-            } while next <= date
-            return next
-
-        case .days:
-            repeat {
-                guard let d = calendar.date(byAdding: .day, value: interval, to: next) else { return nil }
-                next = d
-            } while next <= date
-            return earliestFireOn(next) ?? next
-
-        case .weeks:
-            if reminder.repeatWeekdays.isEmpty {
-                repeat {
-                    guard let d = calendar.date(byAdding: .weekOfYear, value: interval, to: next) else { return nil }
-                    next = d
-                } while next <= date
-                return earliestFireOn(next) ?? next
-            }
-            let wds = Set(reminder.repeatWeekdays)
-            let start = calendar.startOfDay(for: date)
-            for offset in 1...370 {
-                guard let day = calendar.date(byAdding: .day, value: offset, to: start) else { continue }
-                guard wds.contains(calendar.component(.weekday, from: day)) else { continue }
-                if let fire = earliestFireOn(day) { return fire }
-            }
-            return nil
-
-        case .months:
-            repeat {
-                guard let d = calendar.date(byAdding: .month, value: interval, to: next) else { return nil }
-                next = d
-            } while next <= date
-            return earliestFireOn(next) ?? next
-
-        case .years:
-            repeat {
-                guard let d = calendar.date(byAdding: .year, value: interval, to: next) else { return nil }
-                next = d
-            } while next <= date
-            return earliestFireOn(next) ?? next
-
-        case .none:
-            return nil
+            await ReminderActionManager.skipReminderOccurrence(
+                reminder,
+                in: modelContext
+            )
         }
     }
 }

@@ -6,6 +6,7 @@
 import SwiftUI
 import SwiftData
 import UserNotifications
+import WidgetKit
 
 struct RemindersView: View {
     @Environment(\.modelContext) private var modelContext
@@ -13,9 +14,51 @@ struct RemindersView: View {
     @Query(sort: \LureliaReminder.scheduledDate)
     private var reminders: [LureliaReminder]
 
+    @Query(sort: \LureliaReminderHistory.occurrenceDate, order: .reverse)
+    private var reminderHistory: [LureliaReminderHistory]
+    
+    @Query private var userSettings: [UserSettings]
+    
+    private var reminderDebugCounts: Void {
+        let standalone = reminders.filter { $0.kind == .standalone }
+        let tasks = reminders.filter { $0.kind == .task }
+        let routines = reminders.filter { $0.kind == .routine }
+
+        print("📊 REMINDERSVIEW REMINDER KIND COUNTS")
+        print("   • All reminders: \(reminders.count)")
+        print("   • Standalone: \(standalone.count)")
+        print("   • Task: \(tasks.count)")
+        print("   • Routine: \(routines.count)")
+
+        for reminder in reminders {
+            print("   • \(reminder.title) | kind=\(reminder.kind.rawValue) | enabled=\(reminder.isEnabled) | notificationID=\(reminder.notificationID)")
+        }
+    }
+
     @State private var showAddReminder = false
+    @State private var showReminderHistory = false
     @State private var editingReminder: LureliaReminder?
     @State private var showCompletionBanner = false
+    
+    private var hideCompletedReminders: Bool {
+        userSettings.first?.hideCompletedReminders ?? false
+    }
+    
+    private func toggleHideCompletedReminders() {
+        let settings: UserSettings
+
+        if let existing = userSettings.first {
+            settings = existing
+        } else {
+            let created = UserSettings()
+            modelContext.insert(created)
+            settings = created
+        }
+
+        settings.hideCompletedReminders.toggle()
+        settings.updatedAt = Date()
+        try? modelContext.save()
+    }
 
     private func triggerBanner() {
         showCompletionBanner = true
@@ -26,7 +69,17 @@ struct RemindersView: View {
 
     private var filteredReminders: [LureliaReminder] {
         reminders
-            .filter { $0.kind == .standalone }
+            .filter { reminder in
+                guard reminder.kind == .standalone else { return false }
+
+                if hideCompletedReminders,
+                   reminder.repeatUnit == .none,
+                   reminder.isCompleted {
+                    return false
+                }
+
+                return true
+            }
             .sorted {
                 let lDone = $0.isCompleted && $0.repeatUnit == .none
                 let rDone = $1.isCompleted && $1.repeatUnit == .none
@@ -42,26 +95,53 @@ struct RemindersView: View {
         NavigationStack {
             ZStack {
                 LureliaBackgroundAlt()
+                let _ = reminderDebugCounts
 
                 ScrollView(showsIndicators: false) {
                     VStack(spacing: 20) {
 
                         HStack {
                             Text("Reminders")
-                                .font(.system(size: 30, weight: .bold, design: .rounded))
+                                .font(.system(size: 30, weight: .black, design: .rounded))
                                 .foregroundStyle(.white)
 
                             Spacer()
 
-                            Button { showAddReminder = true } label: {
-                                Image("addwavy")
-                                    .renderingMode(.template)
-                                    .resizable()
-                                    .scaledToFit()
-                                    .frame(width: 30, height: 30)
-                                    .foregroundStyle(LGradients.header)
+                            HStack(spacing: 14) {
+                                Button { showReminderHistory = true } label: {
+                                    Image("timebook")
+                                        .renderingMode(.template)
+                                        .resizable()
+                                        .scaledToFit()
+                                        .frame(width: 30, height: 30)
+                                        .foregroundStyle(LGradients.header)
+                                }
+                                .buttonStyle(.plain)
+
+                                Button {
+                                    withAnimation(.spring(response: 0.25, dampingFraction: 0.85)) {
+                                        toggleHideCompletedReminders()
+                                    }
+                                } label: {
+                                    Image(hideCompletedReminders ? "eye" : "eyeslash")
+                                        .renderingMode(.template)
+                                        .resizable()
+                                        .scaledToFit()
+                                        .frame(width: 30, height: 30)
+                                        .foregroundStyle(LGradients.header)
+                                }
+                                .buttonStyle(.plain)
+
+                                Button { showAddReminder = true } label: {
+                                    Image("addwavy")
+                                        .renderingMode(.template)
+                                        .resizable()
+                                        .scaledToFit()
+                                        .frame(width: 30, height: 30)
+                                        .foregroundStyle(LGradients.header)
+                                }
+                                .buttonStyle(.plain)
                             }
-                            .buttonStyle(.plain)
                         }
                         .padding(.horizontal, 24)
                         .padding(.top, 20)
@@ -76,14 +156,25 @@ struct RemindersView: View {
                         } else {
                             LazyVStack(spacing: 14) {
                                 ForEach(filteredReminders) { reminder in
+                                    NavigationLink(value: reminder.id) {
                                     LureliaReminderCard(
                                         reminder: reminder,
                                         onEdit: { editingReminder = reminder },
-                                        onDelete: { delete(reminder) },
+                                        onDelete: {
+                                            print("🟥 CARD onDelete CLOSURE FIRED")
+                                            print("   • Title: \(reminder.title)")
+                                            print("   • UUID: \(reminder.id)")
+                                            print("   • Notification ID: \(reminder.notificationID)")
+                                            delete(reminder)
+                                        },
                                         onComplete: { triggerBanner() }
                                     )
+                                    }
+                                    .buttonStyle(.plain)
+                                    .transition(.opacity.combined(with: .scale(scale: 0.985)))
                                 }
                             }
+                            .animation(.spring(response: 0.36, dampingFraction: 0.9), value: filteredReminders.map(\.id))
                             .padding(.horizontal, 24)
                         }
 
@@ -99,6 +190,14 @@ struct RemindersView: View {
             }
             .sheet(item: $editingReminder) { reminder in
                 AddReminderView(editingReminder: reminder)
+            }
+            .fullScreenCover(isPresented: $showReminderHistory) {
+                LureliaReminderHistoryView()
+            }
+            .navigationDestination(for: UUID.self) { reminderID in
+                if let reminder = reminders.first(where: { $0.id == reminderID }) {
+                    ReminderDetailView(reminder: reminder)
+                }
             }
         }
         .completionBanner(isShowing: showCompletionBanner, message: "Reminder completed!")
@@ -127,7 +226,6 @@ struct RemindersView: View {
         let cal = Calendar.current
         let dayComponents = cal.dateComponents([.year, .month, .day], from: date)
         let times = resolvedTimesOfDay(reminder)
-
         return times.compactMap { timeStr -> Date? in
             let parts = timeStr.split(separator: ":")
             guard parts.count == 2, let h = Int(parts[0]), let m = Int(parts[1]) else { return nil }
@@ -136,67 +234,185 @@ struct RemindersView: View {
         }.sorted()
     }
 
-    private var upcomingTodayCount: Int {
+    private func occurrenceKey(_ date: Date) -> String {
+        let cal = Calendar.current
+        let c = cal.dateComponents([.year, .month, .day, .hour, .minute], from: date)
+        return "\(c.year ?? 0)-\(c.month ?? 0)-\(c.day ?? 0)-\(c.hour ?? 0)-\(c.minute ?? 0)"
+    }
+
+    private func uniqueFireDates(_ reminder: LureliaReminder, on date: Date) -> [Date] {
+        var seen = Set<String>()
+        return allFireDates(reminder, on: date).filter { fireDate in
+            seen.insert(occurrenceKey(fireDate)).inserted
+        }
+    }
+
+    // scheduledDate advances forward as occurrences complete. Walk it back by one interval
+    // if needed to find the effective anchor for checking if this reminder fires on `date`.
+    private func isReminderScheduledForDate(_ reminder: LureliaReminder, date: Date) -> Bool {
+        let cal = Calendar.current
+        let targetStart = cal.startOfDay(for: date)
+        let scheduledStart = cal.startOfDay(for: reminder.scheduledDate)
+
+        switch reminder.repeatUnit {
+        case .none:
+            return cal.isDate(reminder.scheduledDate, inSameDayAs: date)
+
+        case .minutes, .hours:
+            if scheduledStart <= targetStart { return true }
+            if let nf = reminder.nextFireAt, cal.isDate(nf, inSameDayAs: date) { return true }
+            return false
+
+        case .days:
+            let effectiveStart: Date
+            if scheduledStart <= targetStart {
+                effectiveStart = scheduledStart
+            } else {
+                let interval = max(reminder.repeatInterval, 1)
+                guard let walked = cal.date(byAdding: .day, value: -interval, to: scheduledStart),
+                      cal.startOfDay(for: walked) <= targetStart else {
+                    if let nf = reminder.nextFireAt, cal.isDate(nf, inSameDayAs: date) { return true }
+                    return false
+                }
+                effectiveStart = cal.startOfDay(for: walked)
+            }
+            let days = cal.dateComponents([.day], from: effectiveStart, to: targetStart).day ?? 0
+            return days % max(reminder.repeatInterval, 1) == 0
+
+        case .weeks:
+            let effectiveStart: Date
+            if scheduledStart <= targetStart {
+                effectiveStart = scheduledStart
+            } else {
+                let interval = max(reminder.repeatInterval, 1)
+                guard let walked = cal.date(byAdding: .weekOfYear, value: -interval, to: scheduledStart),
+                      cal.startOfDay(for: walked) <= targetStart else {
+                    if let nf = reminder.nextFireAt, cal.isDate(nf, inSameDayAs: date) { return true }
+                    return false
+                }
+                effectiveStart = cal.startOfDay(for: walked)
+            }
+            let todayWeekday = cal.component(.weekday, from: date)
+            if !reminder.repeatWeekdays.isEmpty {
+                guard reminder.repeatWeekdays.contains(todayWeekday) else { return false }
+            }
+            let weeks = cal.dateComponents([.weekOfYear], from: effectiveStart, to: targetStart).weekOfYear ?? 0
+            return weeks % max(reminder.repeatInterval, 1) == 0
+
+        case .months:
+            let effectiveStart: Date
+            if scheduledStart <= targetStart {
+                effectiveStart = scheduledStart
+            } else {
+                let interval = max(reminder.repeatInterval, 1)
+                guard let walked = cal.date(byAdding: .month, value: -interval, to: scheduledStart),
+                      cal.startOfDay(for: walked) <= targetStart else {
+                    if let nf = reminder.nextFireAt, cal.isDate(nf, inSameDayAs: date) { return true }
+                    return false
+                }
+                effectiveStart = cal.startOfDay(for: walked)
+            }
+            let scheduledDay = cal.component(.day, from: effectiveStart)
+            let targetDay = cal.component(.day, from: date)
+            guard scheduledDay == targetDay else { return false }
+            let months = cal.dateComponents([.month], from: effectiveStart, to: targetStart).month ?? 0
+            return months % max(reminder.repeatInterval, 1) == 0
+
+        case .years:
+            let effectiveStart: Date
+            if scheduledStart <= targetStart {
+                effectiveStart = scheduledStart
+            } else {
+                let interval = max(reminder.repeatInterval, 1)
+                guard let walked = cal.date(byAdding: .year, value: -interval, to: scheduledStart),
+                      cal.startOfDay(for: walked) <= targetStart else {
+                    if let nf = reminder.nextFireAt, cal.isDate(nf, inSameDayAs: date) { return true }
+                    return false
+                }
+                effectiveStart = cal.startOfDay(for: walked)
+            }
+            let effMonth = cal.component(.month, from: effectiveStart)
+            let effDay = cal.component(.day, from: effectiveStart)
+            let targetMonth = cal.component(.month, from: date)
+            let targetDay = cal.component(.day, from: date)
+            guard effMonth == targetMonth && effDay == targetDay else { return false }
+            let years = cal.dateComponents([.year], from: effectiveStart, to: targetStart).year ?? 0
+            return years % max(reminder.repeatInterval, 1) == 0
+        }
+    }
+
+    // MARK: - Unified Reminder Overview Snapshot
+
+    private struct ReminderOverviewSnapshot {
+        var total: Int = 0
+        var upcoming: Int = 0
+        var done: Int = 0
+        var skipped: Int = 0
+    }
+
+    private var reminderOverviewSnapshot: ReminderOverviewSnapshot {
         let cal = Calendar.current
         let now = Date()
-        let endOfDay = cal.date(byAdding: .day, value: 1, to: cal.startOfDay(for: now)) ?? now
+        let today = now
 
-        return standaloneReminders.reduce(0) { sum, reminder in
-            guard reminder.isEnabled && !reminder.isCompleted else { return sum }
-            let nextFire = reminder.nextFireAt ?? reminder.scheduledDate
-            guard nextFire > now && nextFire < endOfDay else { return sum }
+        var snapshot = ReminderOverviewSnapshot()
 
-            let nextHH = cal.component(.hour, from: nextFire)
-            let nextMM = cal.component(.minute, from: nextFire)
+        for reminder in standaloneReminders {
+            guard reminder.isEnabled || reminder.isCompleted || !reminder.completionTimestamps.isEmpty || !reminder.skippedTimestamps.isEmpty else { continue }
+            guard isReminderScheduledForDate(reminder, date: today) else { continue }
 
-            var seen = Set<String>()
-            let remaining = allFireDates(reminder, on: now)
-                .map { d in (cal.component(.hour, from: d), cal.component(.minute, from: d)) }
-                .filter { (h, m) in
-                    guard seen.insert("\(h):\(m)").inserted else { return false }
-                    return h > nextHH || (h == nextHH && m >= nextMM)
-                }.count
+            let todayFires = uniqueFireDates(reminder, on: today)
+            guard !todayFires.isEmpty else { continue }
 
-            return sum + max(1, remaining)
+            let todayFireKeys = Set(todayFires.map { occurrenceKey($0) })
+            snapshot.total += todayFires.count
+
+            // Count completions and skips using BOTH key-matched history entries AND raw timestamp counts.
+            // Raw counts handle legacy data where timestamps were wall-clock times, not exact fire times.
+            // Take the max of both, capped at fire count.
+
+            let historyCompletedKeys = Set(reminderHistory
+                .filter { $0.reminderID == reminder.id && $0.action == .completed && cal.isDate($0.occurrenceDate, inSameDayAs: today) }
+                .map { occurrenceKey($0.occurrenceDate) }
+            ).filter { todayFireKeys.contains($0) }
+
+            let historySkippedKeys = Set(reminderHistory
+                .filter { $0.reminderID == reminder.id && $0.action == .skipped && cal.isDate($0.occurrenceDate, inSameDayAs: today) }
+                .map { occurrenceKey($0.occurrenceDate) }
+            ).filter { todayFireKeys.contains($0) }
+
+            let rawCompletedCount = reminder.completionTimestamps.filter { cal.isDate($0, inSameDayAs: today) }.count
+            let rawSkippedCount = reminder.skippedTimestamps.filter { cal.isDate($0, inSameDayAs: today) }.count
+
+            var doneCount = min(max(historyCompletedKeys.count, rawCompletedCount), todayFires.count)
+            let skippedCount = min(max(historySkippedKeys.count, rawSkippedCount), max(0, todayFires.count - doneCount))
+
+            // Non-repeating reminders marked done today
+            if reminder.repeatUnit == .none && reminder.isCompleted {
+                let completedToday = (reminder.completedAt.map { cal.isDate($0, inSameDayAs: today) } ?? false)
+                    || reminder.completionTimestamps.contains { cal.isDate($0, inSameDayAs: today) }
+                if completedToday { doneCount = todayFires.count }
+            }
+
+            let actionedCount = min(doneCount + skippedCount, todayFires.count)
+            let futureFireCount = todayFires.filter { $0 >= now }.count
+            let pastFireCount = todayFires.count - futureFireCount
+            let pastActioned = min(actionedCount, pastFireCount)
+            let futureActioned = max(0, actionedCount - pastActioned)
+            let upcomingCount = max(0, futureFireCount - futureActioned)
+
+            snapshot.done += doneCount
+            snapshot.skipped += skippedCount
+            snapshot.upcoming += upcomingCount
         }
+
+        return snapshot
     }
 
-    private var totalTodayCount: Int {
-        let cal = Calendar.current
-        let now = Date()
-
-        return standaloneReminders.reduce(0) { sum, reminder in
-            guard reminder.isEnabled else { return sum }
-            let nextFire = reminder.nextFireAt ?? reminder.scheduledDate
-            let completedToday = reminder.completionTimestamps.contains { cal.isDateInToday($0) }
-            let skippedToday = reminder.skippedTimestamps.contains { cal.isDateInToday($0) }
-            guard cal.isDate(nextFire, inSameDayAs: now) || completedToday || skippedToday else { return sum }
-
-            var seen = Set<String>()
-            let count = allFireDates(reminder, on: now)
-                .map { d in (cal.component(.hour, from: d), cal.component(.minute, from: d)) }
-                .filter { (h, m) in seen.insert("\(h):\(m)").inserted }
-                .count
-
-            return sum + max(1, count)
-        }
-    }
-
-    private var doneTodayCount: Int {
-        let cal = Calendar.current
-        let today = Date()
-        return standaloneReminders.reduce(0) { sum, reminder in
-            sum + reminder.completionTimestamps.filter { cal.isDate($0, inSameDayAs: today) }.count
-        }
-    }
-
-    private var skippedTodayCount: Int {
-        let cal = Calendar.current
-        let today = Date()
-        return standaloneReminders.reduce(0) { sum, reminder in
-            sum + reminder.skippedTimestamps.filter { cal.isDate($0, inSameDayAs: today) }.count
-        }
-    }
+    private var upcomingTodayCount: Int { reminderOverviewSnapshot.upcoming }
+    private var totalTodayCount: Int { reminderOverviewSnapshot.total }
+    private var doneTodayCount: Int { reminderOverviewSnapshot.done }
+    private var skippedTodayCount: Int { reminderOverviewSnapshot.skipped }
 
     private var nextUpReminder: LureliaReminder? {
         let now = Date()
@@ -220,72 +436,35 @@ struct RemindersView: View {
     }
 
     private func overviewCardContent(now: Date) -> some View {
-        VStack(alignment: .leading, spacing: 16) {
-            HStack(spacing: 10) {
-                Image("bellfill")
-                    .renderingMode(.template).resizable().scaledToFit()
-                    .frame(width: 20, height: 20).foregroundStyle(LGradients.header)
-
-                Text("Overview")
-                    .font(.system(size: 18, weight: .black, design: .rounded))
-                    .foregroundStyle(LColors.textPrimary)
-
-                Spacer()
-
-                if let next = nextUpReminder {
-                    Text("Next: \((next.nextFireAt ?? next.scheduledDate).formatted(date: .omitted, time: .shortened))")
-                        .font(.system(size: 11, weight: .bold, design: .rounded))
-                        .foregroundStyle(LColors.gradientBlue)
-                        .padding(.horizontal, 8).padding(.vertical, 5)
-                        .background(LColors.gradientBlue.opacity(0.12), in: Capsule())
+        GlassCard {
+            VStack(alignment: .leading, spacing: 16) {
+                HStack(spacing: 10) {
+                    Image("bellfill")
+                        .renderingMode(.template).resizable().scaledToFit()
+                        .frame(width: 20, height: 20).foregroundStyle(LGradients.header)
+                    Text("Overview")
+                        .font(.system(size: 18, weight: .black, design: .rounded))
+                        .foregroundStyle(LColors.textPrimary)
+                    Spacer()
+                    if let next = nextUpReminder {
+                        Text("Next: \((next.nextFireAt ?? next.scheduledDate).formatted(date: .omitted, time: .shortened))")
+                            .font(.system(size: 11, weight: .bold, design: .rounded))
+                            .foregroundStyle(LColors.gradientBlue)
+                            .padding(.horizontal, 8).padding(.vertical, 5)
+                            .background(LColors.gradientBlue.opacity(0.12), in: Capsule())
+                    }
+                }
+                Text(encouragingText)
+                    .font(.system(size: 13, weight: .medium, design: .rounded))
+                    .foregroundStyle(LColors.textSecondary)
+                LazyVGrid(columns: [GridItem(.flexible(), spacing: 8), GridItem(.flexible(), spacing: 8)], spacing: 8) {
+                    LureliaReminderStatCard(value: upcomingTodayCount, label: "Upcoming Today")
+                    LureliaReminderStatCard(value: doneTodayCount, label: "Done Today")
+                    LureliaReminderStatCard(value: totalTodayCount, label: "Total Today")
+                    LureliaReminderStatCard(value: skippedTodayCount, label: "Skipped Today")
                 }
             }
-
-            Text(encouragingText)
-                .font(.system(size: 13, weight: .medium, design: .rounded))
-                .foregroundStyle(LColors.textSecondary)
-
-            LazyVGrid(columns: [GridItem(.flexible(), spacing: 8), GridItem(.flexible(), spacing: 8)], spacing: 8) {
-                LureliaReminderStatCard(value: upcomingTodayCount, label: "Upcoming Today")
-                LureliaReminderStatCard(value: doneTodayCount, label: "Done Today")
-                LureliaReminderStatCard(value: totalTodayCount, label: "Total Today")
-                LureliaReminderStatCard(value: skippedTodayCount, label: "Skipped Today")
-            }
         }
-        .padding(18)
-        .background {
-            RoundedRectangle(cornerRadius: 26, style: .continuous)
-                .fill(LColors.glassSurface)
-                .overlay {
-                    RoundedRectangle(cornerRadius: 26, style: .continuous)
-                        .fill(
-                            LinearGradient(
-                                colors: [
-                                    LColors.gradientBlue.opacity(0.12),
-                                    LColors.gradientPurple.opacity(0.14),
-                                    Color.white.opacity(0.02)
-                                ],
-                                startPoint: .topLeading,
-                                endPoint: .bottomTrailing
-                            )
-                        )
-                }
-        }
-        .overlay(
-            RoundedRectangle(cornerRadius: 26, style: .continuous)
-                .strokeBorder(
-                    LinearGradient(
-                        colors: [
-                            LColors.gradientBlue.opacity(0.95),
-                            LColors.gradientPurple.opacity(0.95),
-                            Color.white.opacity(0.55)
-                        ],
-                        startPoint: .topLeading,
-                        endPoint: .bottomTrailing
-                    ),
-                    lineWidth: 1.15
-                )
-        )
     }
 
     private var emptyState: some View {
@@ -293,14 +472,11 @@ struct RemindersView: View {
             Image("bellfill")
                 .renderingMode(.template).resizable().scaledToFit()
                 .frame(width: 48, height: 48).foregroundStyle(LGradients.header)
-
             Text("No Reminders Yet")
                 .font(.system(size: 21, weight: .bold, design: .rounded)).foregroundStyle(LColors.textPrimary)
-
             Text("Create standalone reminders to track anything you need to remember.")
                 .font(.system(size: 14, design: .rounded)).foregroundStyle(LColors.textSecondary)
                 .multilineTextAlignment(.center).padding(.horizontal, 18)
-
             Button { showAddReminder = true } label: {
                 Text("Create Reminder")
                     .font(.system(size: 15, weight: .black, design: .rounded)).foregroundStyle(.white)
@@ -315,8 +491,7 @@ struct RemindersView: View {
     }
 
     private func delete(_ reminder: LureliaReminder) {
-        modelContext.delete(reminder)
-        try? modelContext.save()
+        ReminderActionManager.deleteReminder(reminder, in: modelContext)
     }
 }
 
@@ -325,22 +500,22 @@ struct RemindersView: View {
 struct LureliaReminderCard: View {
     @Environment(\.modelContext) private var modelContext
     @Bindable var reminder: LureliaReminder
+    @State private var showDeleteConfirmation = false
+    @State private var isCompleting = false
+    @State private var checklistIsExpanded = false
 
     let onEdit: () -> Void
     let onDelete: () -> Void
     var onComplete: (() -> Void)? = nil
 
     private var accent: Color { reminder.isEnabled ? LColors.gradientBlue : LColors.textSecondary }
-
     private var dateText: String { reminder.scheduledDate.formatted(date: .abbreviated, time: .omitted) }
 
-    // All configured fire times displayed on the card — read from timesOfDay (source of truth)
     private var allFireDates: [Date] {
         let cal = Calendar.current
         let anchor = reminder.nextFireAt ?? reminder.scheduledDate
         let dayComponents = cal.dateComponents([.year, .month, .day], from: anchor)
         let times = resolvedTimesOfDay()
-
         return times.compactMap { timeStr -> Date? in
             let parts = timeStr.split(separator: ":")
             guard parts.count == 2, let h = Int(parts[0]), let m = Int(parts[1]) else { return nil }
@@ -361,8 +536,6 @@ struct LureliaReminderCard: View {
     }
 
     private var isDoneToday: Bool {
-        // Recurring reminders are never "done" — they always show status badges
-        // This matches the main RemindersView behavior exactly.
         guard reminder.repeatUnit == .none else { return false }
         let cal = Calendar.current
         if let completedAt = reminder.completedAt, cal.isDateInToday(completedAt) { return true }
@@ -380,7 +553,6 @@ struct LureliaReminderCard: View {
         guard !isDoneToday && reminder.isEnabled else { return false }
         if reminder.repeatUnit == .none && reminder.isCompleted { return false }
         let nextFire = reminder.nextFireAt ?? reminder.scheduledDate
-        // Recurring reminders missed on a prior day should not stay stuck on Due Now
         if reminder.repeatUnit != .none {
             let startOfToday = Calendar.current.startOfDay(for: now)
             if nextFire < startOfToday { return false }
@@ -427,6 +599,32 @@ struct LureliaReminderCard: View {
         reminder.icon.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? "bellfill" : reminder.icon
     }
 
+    private func debugDate(_ date: Date?) -> String {
+        guard let date else { return "nil" }
+        return date.formatted(date: .abbreviated, time: .standard)
+    }
+
+    private func debugReminderState(_ label: String) {
+        print("""
+        🧪 [ReminderDebug] \(label)
+        title=\(reminder.title)
+        id=\(reminder.id)
+        repeatUnit=\(reminder.repeatUnit.rawValue)
+        repeatInterval=\(reminder.repeatInterval)
+        isEnabled=\(reminder.isEnabled)
+        isCompleted=\(reminder.isCompleted)
+        scheduledDate=\(debugDate(reminder.scheduledDate))
+        nextFireAt=\(debugDate(reminder.nextFireAt))
+        completedAt=\(debugDate(reminder.completedAt))
+        completionTimestamps=\(reminder.completionTimestamps.map { debugDate($0) })
+        skippedTimestamps=\(reminder.skippedTimestamps.map { debugDate($0) })
+        timesOfDay=\(resolvedTimesOfDay())
+        additionalFireTimes=\(reminder.additionalFireTimes.map { String(format: "%02d:%02d", $0.hour, $0.minute) })
+        repeatWeekdays=\(reminder.repeatWeekdays)
+        checklistCompleted=\(reminder.checklistCompletedCount)/\(reminder.checklistTotalCount)
+        """)
+    }
+
     var body: some View {
         TimelineView(.periodic(from: .now, by: 30)) { context in
             let now = context.date
@@ -440,99 +638,109 @@ struct LureliaReminderCard: View {
 
     @ViewBuilder
     private func cardContent(overdue: Bool, dueNow: Bool, upcoming: Bool) -> some View {
-        VStack(spacing: 14) {
-            HStack(alignment: .top, spacing: 14) {
-                ZStack {
-                    Circle().fill(Color.white.opacity(0.10)).frame(width: 54, height: 54)
-                    Circle().fill(Color.white.opacity(0.08)).frame(width: 38, height: 38).blur(radius: 10)
-                    LureliaIconView(iconId: reminderIcon, size: 26).foregroundStyle(.white)
-                }
+        GlassCard {
+            VStack(spacing: 14) {
+                HStack(alignment: .top, spacing: 14) {
+                    ZStack {
+                        Circle()
+                            .fill(Color.white.opacity(0.10))
+                            .frame(width: 54, height: 54)
+                            .overlay(
+                                Circle()
+                                    .strokeBorder(LGradients.header, lineWidth: 1.8)
+                            )
 
-                VStack(alignment: .leading, spacing: 6) {
-                    Text(reminder.title)
-                        .font(.system(size: 16, weight: .bold, design: .rounded))
-                        .foregroundStyle(reminder.isEnabled ? LColors.textPrimary : LColors.textSecondary)
-                        .lineLimit(2)
+                        Circle()
+                            .fill(Color.white.opacity(0.08))
+                            .frame(width: 38, height: 38)
+                            .blur(radius: 10)
 
-                    if !reminder.category.isEmpty {
-                        Text(reminder.category)
-                            .font(.system(size: 10, weight: .bold, design: .rounded))
-                            .foregroundStyle(accent).padding(.horizontal, 7).padding(.vertical, 4)
-                            .background(accent.opacity(0.12), in: Capsule())
+                        LureliaIconView(iconId: reminderIcon, size: 33)
+                            .foregroundStyle(LGradients.header)
                     }
+                    .frame(width: 54, height: 54)
+                    .layoutPriority(1)
 
-                    if let notes = reminder.notes, !notes.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                        Text(notes)
-                            .font(.system(size: 12, design: .rounded))
-                            .foregroundStyle(LColors.textSecondary.opacity(0.75)).lineLimit(2)
-                    }
-                }
-
-                completionCircle
-            }
-
-            Divider().overlay(LColors.glassBorder)
-
-            VStack(spacing: 10) {
-                HStack(spacing: 10) {
-                    reminderMetaPill(icon: "dotscal", title: dateText)
-                    reminderRepeatLine(icon: "repeat", title: compactRepeatText)
-                }
-                fireTimesGrid
-                if overdue || dueNow || upcoming {
-                    HStack {
-                        if overdue {
-                            reminderBubbleText("OVERDUE",  color: Color(lureliaHex: "#ff9be6"))
-                        } else if dueNow {
-                            reminderBubbleText("DUE NOW",  color: Color(lureliaHex: "#b476ff"))
-                        } else if upcoming {
-                            reminderBubbleText("UPCOMING", color: Color(lureliaHex: "#7eedff"))
+                    VStack(alignment: .leading, spacing: 6) {
+                        Text(reminder.title)
+                            .font(.system(size: 16, weight: .bold, design: .rounded))
+                            .foregroundStyle(reminder.isEnabled ? LColors.textPrimary : LColors.textSecondary)
+                            .lineLimit(2)
+                            .fixedSize(horizontal: false, vertical: true)
+                        if !reminder.category.isEmpty {
+                            Text(reminder.category)
+                                .font(.system(size: 10, weight: .bold, design: .rounded))
+                                .foregroundStyle(accent).padding(.horizontal, 7).padding(.vertical, 4)
+                                .background(accent.opacity(0.12), in: Capsule())
                         }
-                        Spacer(minLength: 0)
+                        if let notes = reminder.notes, !notes.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                            Text(notes)
+                                .font(.system(size: 12, design: .rounded))
+                                .foregroundStyle(LColors.textSecondary.opacity(0.75)).lineLimit(2)
+                        }
                     }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .layoutPriority(0)
+
+                    Spacer(minLength: 8)
+
+                    completionCircle
+                        .frame(width: 30, height: 30)
+                        .layoutPriority(1)
+                }
+
+                Divider().overlay(LColors.glassBorder)
+
+                VStack(spacing: 10) {
+                    HStack(spacing: 10) {
+                        reminderMetaPill(icon: "dotscal", title: dateText)
+                        reminderRepeatLine(icon: "repeatfill", title: compactRepeatText)
+                    }
+                    fireTimesGrid
+                    if overdue || dueNow || upcoming {
+                        HStack {
+                            if overdue { reminderBubbleText("OVERDUE", color: Color(lureliaHex: "#ff9be6")) }
+                            else if dueNow { reminderBubbleText("DUE NOW", color: Color(lureliaHex: "#b476ff")) }
+                            else if upcoming { reminderBubbleText("UPCOMING", color: Color(lureliaHex: "#7eedff")) }
+                            Spacer(minLength: 0)
+                        }
+                    }
+
+                    checklistSection
+                }
+
+                HStack(spacing: 10) {
+                    Button { onEdit() } label: { reminderActionButton(title: "Edit", icon: "settings") }.buttonStyle(.plain)
+                    Button { skipReminderOccurrence() } label: { reminderActionButton(title: "Skip", icon: "skipwavy") }
+                        .buttonStyle(.plain)
+                        .disabled(!reminder.isEnabled || (reminder.repeatUnit == .none && reminder.isCompleted))
+                        .opacity((!reminder.isEnabled || (reminder.repeatUnit == .none && reminder.isCompleted)) ? 0.4 : 1)
+                    Button(role: .destructive) {
+                        print("🟥 DELETE BUTTON TAPPED ON CARD")
+                        print("   • Title: \(reminder.title)")
+                        print("   • UUID: \(reminder.id)")
+                        print("   • Notification ID: \(reminder.notificationID)")
+                        showDeleteConfirmation = true
+                    } label: { reminderActionButton(title: "Delete", icon: "trash") }
+                        .buttonStyle(.plain)
                 }
             }
-
-            HStack(spacing: 10) {
-                Button { onEdit() } label: { reminderActionButton(title: "Edit", icon: "slider") }.buttonStyle(.plain)
-
-                Button { skipReminderOccurrence() } label: { reminderActionButton(title: "Skip", icon: "skipwavy") }
-                    .buttonStyle(.plain)
-                    .disabled(!reminder.isEnabled || (reminder.repeatUnit == .none && reminder.isCompleted))
-                    .opacity((!reminder.isEnabled || (reminder.repeatUnit == .none && reminder.isCompleted)) ? 0.4 : 1)
-
-                Button(role: .destructive) { onDelete() } label: { reminderActionButton(title: "Delete", icon: "trash") }
-                    .buttonStyle(.plain)
+        }
+        .opacity(isCompleting ? 0.72 : (reminder.isEnabled ? 1 : 0.65))
+        .scaleEffect(isCompleting ? 0.985 : 1)
+        .animation(.spring(response: 0.22, dampingFraction: 0.86), value: isCompleting)
+        .confirmationDialog("Delete Reminder?", isPresented: $showDeleteConfirmation, titleVisibility: .visible) {
+            Button("Delete Reminder", role: .destructive) {
+                print("🟥 CONFIRM DELETE TAPPED")
+                print("   • Title: \(reminder.title)")
+                print("   • UUID: \(reminder.id)")
+                print("   • Notification ID: \(reminder.notificationID)")
+                onDelete()
             }
+            Button("Cancel", role: .cancel) { }
+        } message: {
+            Text("This will delete \"\(reminder.title)\" and cancel its scheduled notifications.")
         }
-        .padding(16)
-        .background {
-            RoundedRectangle(cornerRadius: 24, style: .continuous)
-                .fill(LColors.glassSurface)
-                .overlay {
-                    RoundedRectangle(cornerRadius: 24, style: .continuous)
-                        .fill(LinearGradient(
-                            colors: [accent.opacity(reminder.isEnabled ? 0.13 : 0.04), LColors.gradientPurple.opacity(reminder.isEnabled ? 0.08 : 0.03), Color.white.opacity(0.02)],
-                            startPoint: .topLeading, endPoint: .bottomTrailing
-                        ))
-                }
-                .overlay {
-                    RoundedRectangle(cornerRadius: 24, style: .continuous)
-                        .strokeBorder(
-                            LinearGradient(
-                                colors: [
-                                    LColors.gradientBlue.opacity(reminder.isEnabled ? 0.95 : 0.35),
-                                    LColors.gradientPurple.opacity(reminder.isEnabled ? 0.95 : 0.35),
-                                    Color.white.opacity(reminder.isEnabled ? 0.55 : 0.18)
-                                ],
-                                startPoint: .topLeading,
-                                endPoint: .bottomTrailing
-                            ),
-                            lineWidth: 1.15
-                        )
-                }
-        }
-        .opacity(reminder.isEnabled ? 1 : 0.65)
     }
 
     // MARK: Sub-views
@@ -541,16 +749,23 @@ struct LureliaReminderCard: View {
         Button { completeReminderOccurrence() } label: {
             ZStack {
                 Circle()
-                    .fill(reminder.isCompleted && reminder.repeatUnit == .none ? accent.opacity(0.18) : Color.clear)
+                    .fill(
+                        reminder.isCompleted && reminder.repeatUnit == .none
+                        ? AnyShapeStyle(LGradients.header)
+                        : AnyShapeStyle(Color.clear)
+                    )
                     .frame(width: 30, height: 30)
-                    .overlay { Circle().strokeBorder(accent.opacity(0.75), lineWidth: 2) }
+                    .overlay {
+                        Circle()
+                            .strokeBorder(LGradients.header, lineWidth: 2)
+                    }
                 if reminder.isCompleted && reminder.repeatUnit == .none {
                     Image("checkwavy")
                         .renderingMode(.template)
                         .resizable()
                         .scaledToFit()
                         .frame(width: 12, height: 12)
-                        .foregroundStyle(accent)
+                        .foregroundStyle(.white)
                 }
             }
             .contentShape(Circle())
@@ -559,14 +774,128 @@ struct LureliaReminderCard: View {
     }
 
     private var fireTimesGrid: some View {
-        LazyVGrid(
-            columns: [GridItem(.flexible(), spacing: 8), GridItem(.flexible(), spacing: 8), GridItem(.flexible(), spacing: 8)],
-            alignment: .center, spacing: 8
-        ) {
+        LazyVGrid(columns: [GridItem(.flexible(), spacing: 8), GridItem(.flexible(), spacing: 8), GridItem(.flexible(), spacing: 8)], alignment: .center, spacing: 8) {
             ForEach(Array(allFireDates.enumerated()), id: \.offset) { _, d in
                 reminderBubbleText(d.formatted(date: .omitted, time: .shortened), color: accent)
             }
         }
+    }
+
+    @ViewBuilder
+    private var checklistSection: some View {
+        let items = sortedChecklistItems
+
+        if !items.isEmpty {
+            VStack(spacing: 0) {
+                Button {
+                    withAnimation(.spring(response: 0.28, dampingFraction: 0.86)) {
+                        checklistIsExpanded.toggle()
+                    }
+                } label: {
+                    HStack(spacing: 8) {
+                        Image("checkwavy")
+                            .renderingMode(.template)
+                            .resizable()
+                            .scaledToFit()
+                            .foregroundStyle(LGradients.header)
+                            .frame(width: 18, height: 18)
+
+                        Text("Completion Steps")
+                            .font(.system(size: 13, weight: .black, design: .rounded))
+                            .foregroundStyle(LColors.textPrimary.opacity(0.9))
+
+                        Text("\(reminder.checklistCompletedCount)/\(reminder.checklistTotalCount)")
+                            .font(.system(size: 12, weight: .bold, design: .rounded))
+                            .foregroundStyle(LColors.textSecondary.opacity(0.82))
+
+                        Spacer()
+
+                        Image(checklistIsExpanded ? "chevup" : "chevdown")
+                            .renderingMode(.template)
+                            .resizable()
+                            .scaledToFit()
+                            .foregroundStyle(LGradients.header)
+                            .frame(width: 18, height: 18)
+                    }
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 9)
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+
+                if checklistIsExpanded {
+                    VStack(spacing: 0) {
+                        ForEach(Array(items.enumerated()), id: \.element.id) { index, item in
+                            checklistItemRow(item)
+
+                            if index != items.count - 1 {
+                                Rectangle()
+                                    .fill(Color.white.opacity(0.055))
+                                    .frame(height: 1)
+                                    .padding(.leading, 34)
+                            }
+                        }
+                    }
+                    .padding(.horizontal, 10)
+                    .padding(.bottom, 10)
+                    .transition(.opacity.combined(with: .move(edge: .top)))
+                }
+            }
+            .background(
+                LColors.glassSurface2.opacity(0.72),
+                in: RoundedRectangle(cornerRadius: 14, style: .continuous)
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: 14, style: .continuous)
+                    .strokeBorder(Color.white.opacity(0.08), lineWidth: 1)
+            )
+        }
+    }
+
+    private var sortedChecklistItems: [LureliaReminderChecklistItem] {
+        reminder.checklistItems
+            .filter { !$0.title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
+            .sorted { $0.sortOrder < $1.sortOrder }
+    }
+
+    private func checklistItemRow(_ item: LureliaReminderChecklistItem) -> some View {
+        Button {
+            toggleChecklistItem(item)
+        } label: {
+            HStack(spacing: 10) {
+                ZStack {
+                    Circle()
+                        .fill(item.isCompleted ? AnyShapeStyle(LGradients.header) : AnyShapeStyle(Color.clear))
+                        .frame(width: 18, height: 18)
+
+                    Circle()
+                        .strokeBorder(
+                            item.isCompleted ? AnyShapeStyle(Color.clear) : AnyShapeStyle(LGradients.header),
+                            lineWidth: 1.3
+                        )
+                        .frame(width: 18, height: 18)
+
+                    if item.isCompleted {
+                        Image("checkwavy")
+                            .renderingMode(.template)
+                            .resizable()
+                            .scaledToFit()
+                            .foregroundStyle(.white)
+                            .frame(width: 10, height: 10)
+                    }
+                }
+
+                Text(item.title)
+                    .font(.system(size: 12, weight: .semibold, design: .rounded))
+                    .foregroundStyle(item.isCompleted ? LColors.textSecondary.opacity(0.68) : LColors.textPrimary.opacity(0.9))
+                    .strikethrough(item.isCompleted, color: LColors.textSecondary.opacity(0.7))
+                    .lineLimit(2)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
+            .padding(.vertical, 8)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
     }
 
     private func reminderBubbleText(_ title: String, color: Color) -> some View {
@@ -582,7 +911,7 @@ struct LureliaReminderCard: View {
             Image(icon).renderingMode(.template).resizable().scaledToFit().frame(width: 12, height: 12)
             Text(title).font(.system(size: 10, weight: .semibold, design: .rounded)).lineLimit(1)
         }
-        .foregroundStyle(LColors.textSecondary).frame(maxWidth: .infinity).padding(.vertical, 8)
+        .foregroundStyle(.white).frame(maxWidth: .infinity).padding(.vertical, 8)
         .background(LColors.glassSurface2, in: RoundedRectangle(cornerRadius: 12))
         .overlay(RoundedRectangle(cornerRadius: 12).strokeBorder(LColors.glassBorder, lineWidth: 1))
     }
@@ -593,7 +922,7 @@ struct LureliaReminderCard: View {
             Text(title).font(.system(size: 11, weight: .semibold, design: .rounded)).lineLimit(1).minimumScaleFactor(0.85)
             Spacer()
         }
-        .foregroundStyle(LColors.textSecondary).padding(.horizontal, 12).padding(.vertical, 9).frame(maxWidth: .infinity)
+        .foregroundStyle(.white).padding(.horizontal, 12).padding(.vertical, 9).frame(maxWidth: .infinity)
         .background(LColors.glassSurface2, in: RoundedRectangle(cornerRadius: 12))
         .overlay(RoundedRectangle(cornerRadius: 12).strokeBorder(LColors.glassBorder, lineWidth: 1))
     }
@@ -615,155 +944,64 @@ struct LureliaReminderCard: View {
 
     // MARK: Actions
 
-    private func completeReminderOccurrence() {
-        Task {
-            await LureliaNotificationManager.shared.cancelReminder(reminder)
-            withAnimation(.spring(response: 0.28, dampingFraction: 0.78)) {
-                reminder.updatedAt = Date()
-                let completedAt = reminder.nextFireAt ?? reminder.scheduledDate
-                var timestamps = reminder.completionTimestamps
-                timestamps.append(completedAt)
-                reminder.completionTimestamps = timestamps
+    private func toggleChecklistItem(_ item: LureliaReminderChecklistItem) {
+        var items = reminder.checklistItems
+        guard let index = items.firstIndex(where: { $0.id == item.id }) else { return }
 
-                if reminder.repeatUnit != .none, let next = nextScheduledDate(after: completedAt) {
-                    reminder.nextFireAt = next
-                    if !Calendar.current.isDate(next, inSameDayAs: reminder.scheduledDate) {
-                        reminder.scheduledDate = primaryFireDate(onSameDayAs: next)
-                    }
-                } else {
-                    reminder.isCompleted = true
-                    reminder.completedAt = Date()
+        items[index].isCompleted.toggle()
+        items[index].updatedAt = Date()
+
+        reminder.checklistItems = items
+        reminder.updatedAt = Date()
+        try? modelContext.save()
+    }
+
+    private func completeReminderOccurrence() {
+        guard !isCompleting else { return }
+        debugReminderState("COMPLETE tapped - BEFORE")
+
+        withAnimation(.spring(response: 0.2, dampingFraction: 0.86)) {
+            isCompleting = true
+        }
+
+        Task {
+            await ReminderActionManager.completeReminderOccurrence(
+                reminder,
+                in: modelContext
+            )
+
+            await MainActor.run {
+                debugReminderState("COMPLETE tapped - AFTER MANAGER")
+                onComplete?()
+
+                withAnimation(.spring(response: 0.26, dampingFraction: 0.9)) {
+                    isCompleting = false
                 }
             }
-            try? modelContext.save()
-            if reminder.repeatUnit != .none && reminder.isEnabled {
-                await LureliaNotificationManager.shared.scheduleReminder(reminder)
-            }
-            await MainActor.run { onComplete?() }
         }
     }
 
     private func skipReminderOccurrence() {
-        Task {
-            await LureliaNotificationManager.shared.cancelReminder(reminder)
-            withAnimation(.spring(response: 0.28, dampingFraction: 0.78)) {
-                reminder.updatedAt = Date()
-                let skippedAt = reminder.nextFireAt ?? reminder.scheduledDate
-                var timestamps = reminder.skippedTimestamps
-                timestamps.append(skippedAt)
-                reminder.skippedTimestamps = timestamps
+        guard !isCompleting else { return }
+        debugReminderState("SKIP tapped - BEFORE")
 
-                if let next = nextScheduledDate(after: skippedAt) {
-                    reminder.nextFireAt = next
-                    if !Calendar.current.isDate(next, inSameDayAs: reminder.scheduledDate) {
-                        reminder.scheduledDate = primaryFireDate(onSameDayAs: next)
-                    }
-                } else {
-                    reminder.isEnabled = false
+        withAnimation(.spring(response: 0.2, dampingFraction: 0.86)) {
+            isCompleting = true
+        }
+
+        Task {
+            await ReminderActionManager.skipReminderOccurrence(
+                reminder,
+                in: modelContext
+            )
+
+            await MainActor.run {
+                debugReminderState("SKIP tapped - AFTER MANAGER")
+
+                withAnimation(.spring(response: 0.26, dampingFraction: 0.9)) {
+                    isCompleting = false
                 }
             }
-            try? modelContext.save()
-            if reminder.isEnabled {
-                await LureliaNotificationManager.shared.scheduleReminder(reminder)
-            }
-        }
-    }
-
-    private func primaryFireDate(onSameDayAs date: Date) -> Date {
-        let cal = Calendar.current
-        var day = cal.dateComponents([.year, .month, .day], from: date)
-        let time = cal.dateComponents([.hour, .minute, .second], from: reminder.scheduledDate)
-        day.hour = time.hour
-        day.minute = time.minute
-        day.second = time.second ?? 0
-        return cal.date(from: day) ?? date
-    }
-
-    private func nextScheduledDate(after date: Date) -> Date? {
-        let calendar = Calendar.current
-        let allTodayFires = allFireTimesOnSameDay(as: reminder.scheduledDate, using: calendar)
-        if let nextToday = allTodayFires.filter({ $0 > date }).min() { return nextToday }
-        return nextOccurrenceAfter(date: date, calendar: calendar)
-    }
-
-    private func allFireTimesOnSameDay(as refDate: Date, using calendar: Calendar) -> [Date] {
-        let dayComponents = calendar.dateComponents([.year, .month, .day], from: refDate)
-        let times = resolvedTimesOfDay()
-
-        return times.compactMap { timeStr -> Date? in
-            let parts = timeStr.split(separator: ":")
-            guard parts.count == 2, let h = Int(parts[0]), let m = Int(parts[1]) else { return nil }
-            var c = dayComponents
-            c.hour = h
-            c.minute = m
-            c.second = 0
-            return calendar.date(from: c)
-        }.sorted()
-    }
-
-    private func nextOccurrenceAfter(date: Date, calendar: Calendar) -> Date? {
-        let interval = max(1, reminder.repeatInterval)
-        var next = reminder.scheduledDate
-
-        func earliestFireOn(_ d: Date) -> Date? {
-            allFireTimesOnSameDay(as: d, using: calendar).filter { $0 > date }.min()
-        }
-
-        switch reminder.repeatUnit {
-        case .minutes:
-            repeat {
-                guard let d = calendar.date(byAdding: .minute, value: interval, to: next) else { return nil }
-                next = d
-            } while next <= date
-            return next
-
-        case .hours:
-            repeat {
-                guard let d = calendar.date(byAdding: .hour, value: interval, to: next) else { return nil }
-                next = d
-            } while next <= date
-            return next
-
-        case .days:
-            repeat {
-                guard let d = calendar.date(byAdding: .day, value: interval, to: next) else { return nil }
-                next = d
-            } while next <= date
-            return earliestFireOn(next) ?? next
-
-        case .weeks:
-            if reminder.repeatWeekdays.isEmpty {
-                repeat {
-                    guard let d = calendar.date(byAdding: .weekOfYear, value: interval, to: next) else { return nil }
-                    next = d
-                } while next <= date
-                return earliestFireOn(next) ?? next
-            }
-            let wds = Set(reminder.repeatWeekdays)
-            let start = calendar.startOfDay(for: date)
-            for offset in 1...370 {
-                guard let day = calendar.date(byAdding: .day, value: offset, to: start) else { continue }
-                guard wds.contains(calendar.component(.weekday, from: day)) else { continue }
-                if let fire = earliestFireOn(day) { return fire }
-            }
-            return nil
-
-        case .months:
-            repeat {
-                guard let d = calendar.date(byAdding: .month, value: interval, to: next) else { return nil }
-                next = d
-            } while next <= date
-            return earliestFireOn(next) ?? next
-
-        case .years:
-            repeat {
-                guard let d = calendar.date(byAdding: .year, value: interval, to: next) else { return nil }
-                next = d
-            } while next <= date
-            return earliestFireOn(next) ?? next
-
-        case .none:
-            return nil
         }
     }
 }

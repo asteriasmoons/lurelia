@@ -6,6 +6,8 @@
 import SwiftUI
 import SwiftData
 import UserNotifications
+import WidgetKit
+import MapKit
 
 struct AddReminderView: View {
     @Environment(\.modelContext) private var modelContext
@@ -22,6 +24,11 @@ struct AddReminderView: View {
     @State private var selectedIcon = "bellfill"
     @State private var showIconPicker = false
     @FocusState private var notesFieldIsFocused: Bool
+    @State private var checklistItems: [LureliaReminderChecklistItem] = [
+        LureliaReminderChecklistItem(title: "", sortOrder: 0)
+    ]
+    @State private var emptyChecklistSubmitCount = 0
+    @FocusState private var focusedChecklistItemID: UUID?
     
     
     @State private var reminderDate = Date()
@@ -34,6 +41,22 @@ struct AddReminderView: View {
     @State private var repeatWeekdays: Set<Int> = []
     @State private var repeatEnds = false
     @State private var repeatEndsAt = Date()
+
+    // Detail fields
+    @State private var purpose = ""
+    @State private var importance = ""
+    @State private var reminderOutcome = ""
+    @State private var temptationNeed = ""
+    @State private var temptationWant = ""
+
+    // Location fields
+    @State private var locationLabel = ""
+    @State private var locationAddress = ""
+    @State private var locationLatitude: Double? = nil
+    @State private var locationLongitude: Double? = nil
+    @State private var locationSearchText = ""
+    @State private var locationSearchResults: [MKMapItem] = []
+    @State private var showLocationSearch = false
     
     private let weekdays: [(label: String, value: Int)] = [
         ("Su", 1), ("Mo", 2), ("Tu", 3), ("We", 4),
@@ -101,6 +124,7 @@ struct AddReminderView: View {
                     .contentShape(Rectangle())
                     .onTapGesture {
                         notesFieldIsFocused = false
+                        focusedChecklistItemID = nil
                     }
                 
                 ScrollView(showsIndicators: false) {
@@ -121,6 +145,8 @@ struct AddReminderView: View {
                                 .foregroundStyle(LColors.textPrimary)
                         }
 
+                        checklistField
+
                         field("Icon") {
                             Button {
                                 showIconPicker = true
@@ -128,8 +154,12 @@ struct AddReminderView: View {
                                 HStack(spacing: 12) {
                                     ZStack {
                                         Circle()
-                                            .fill(LColors.gradientBlue.opacity(0.16))
+                                            .fill(Color.white.opacity(0.14))
                                             .frame(width: 44, height: 44)
+                                            .overlay(
+                                                Circle()
+                                                    .strokeBorder(LGradients.header, lineWidth: 1.4)
+                                            )
 
                                         LureliaIconView(iconId: selectedIcon, size: 22)
                                             .foregroundStyle(LGradients.header)
@@ -147,7 +177,7 @@ struct AddReminderView: View {
 
                                     Spacer()
 
-                                    Image("slider")
+                                    Image("settings")
                                         .renderingMode(.template)
                                         .resizable()
                                         .scaledToFit()
@@ -184,7 +214,52 @@ struct AddReminderView: View {
                         field("Repeat") {
                             repeatSection
                         }
+
+                        // Detail fields
+
+                        field("Purpose") {
+                            TextField("Why does this reminder exist?", text: $purpose, axis: .vertical)
+                                .lineLimit(3, reservesSpace: true)
+                                .font(.system(size: 15, design: .rounded))
+                                .foregroundStyle(LColors.textPrimary)
+                        }
+
+                        field("Importance") {
+                            TextField("Why should I actually do this today?", text: $importance, axis: .vertical)
+                                .lineLimit(3, reservesSpace: true)
+                                .font(.system(size: 15, design: .rounded))
+                                .foregroundStyle(LColors.textPrimary)
+                        }
+
+                        field("Outcome") {
+                            TextField("What does completing this accomplish?", text: $reminderOutcome, axis: .vertical)
+                                .lineLimit(3, reservesSpace: true)
+                                .font(.system(size: 15, design: .rounded))
+                                .foregroundStyle(LColors.textPrimary)
+                        }
                         
+                        field("Temptation Bundling") {
+                            VStack(alignment: .leading, spacing: 12) {
+                                TextField("Need: what do I need to do?", text: $temptationNeed, axis: .vertical)
+                                    .lineLimit(2, reservesSpace: true)
+                                    .font(.system(size: 15, design: .rounded))
+                                    .foregroundStyle(LColors.textPrimary)
+
+                                Rectangle()
+                                    .fill(.white.opacity(0.08))
+                                    .frame(height: 1)
+
+                                TextField("Want: what do I want to do?", text: $temptationWant, axis: .vertical)
+                                    .lineLimit(2, reservesSpace: true)
+                                    .font(.system(size: 15, design: .rounded))
+                                    .foregroundStyle(LColors.textPrimary)
+                            }
+                        }
+
+                        // Location
+
+                        locationField
+
                         Button {
                             save()
                         } label: {
@@ -265,8 +340,12 @@ struct AddReminderView: View {
             HStack(spacing: 14) {
                 ZStack {
                     Circle()
-                        .fill(LColors.gradientBlue.opacity(0.16))
+                        .fill(Color.white.opacity(0.14))
                         .frame(width: 58, height: 58)
+                        .overlay(
+                            Circle()
+                                .strokeBorder(LGradients.header, lineWidth: 1.6)
+                        )
 
                     LureliaIconView(iconId: selectedIcon, size: 28)
                         .foregroundStyle(LGradients.header)
@@ -329,6 +408,175 @@ struct AddReminderView: View {
                 )
         )
     }
+    private var checklistField: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(spacing: 10) {
+                Text("Completion Steps")
+                    .font(.system(size: 13, weight: .bold, design: .rounded))
+                    .foregroundStyle(LColors.textSecondary)
+
+                Spacer()
+            }
+
+            VStack(alignment: .leading, spacing: 12) {
+                HStack(spacing: 10) {
+                    VStack(alignment: .leading, spacing: 3) {
+                        Text("\(nonEmptyChecklistItems.count) items")
+                            .font(.system(size: 13, weight: .black, design: .rounded))
+                            .foregroundStyle(LColors.textPrimary)
+
+                        Text("Add small steps to complete this reminder.")
+                            .font(.system(size: 12, design: .rounded))
+                            .foregroundStyle(LColors.textSecondary.opacity(0.75))
+                    }
+
+                    Spacer()
+
+                    Button {
+                        addChecklistItemAndFocus()
+                    } label: {
+                        Image("addwavy")
+                            .renderingMode(.template)
+                            .resizable()
+                            .scaledToFit()
+                            .foregroundStyle(LGradients.header)
+                            .frame(width: 24, height: 24)
+                    }
+                    .buttonStyle(.plain)
+                }
+
+                VStack(spacing: 10) {
+                    ForEach(checklistItems) { item in
+                        checklistRow(item)
+                    }
+                }
+            }
+            .padding(14)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(LColors.glassSurface, in: RoundedRectangle(cornerRadius: 18))
+            .overlay(
+                RoundedRectangle(cornerRadius: 18)
+                    .strokeBorder(
+                        LinearGradient(
+                            colors: [
+                                LColors.gradientBlue.opacity(0.85),
+                                LColors.gradientPurple.opacity(0.85),
+                                Color.white.opacity(0.35)
+                            ],
+                            startPoint: .topLeading,
+                            endPoint: .bottomTrailing
+                        ),
+                        lineWidth: 1.1
+                    )
+            )
+        }
+    }
+
+    private func checklistRow(_ item: LureliaReminderChecklistItem) -> some View {
+        HStack(spacing: 10) {
+            Circle()
+                .strokeBorder(LGradients.header, lineWidth: 1.4)
+                .frame(width: 20, height: 20)
+
+            TextField("Step", text: checklistTitleBinding(for: item.id))
+                .focused($focusedChecklistItemID, equals: item.id)
+                .submitLabel(.return)
+                .onSubmit {
+                    handleChecklistSubmit(for: item.id)
+                }
+                .font(.system(size: 14, weight: .semibold, design: .rounded))
+                .foregroundStyle(LColors.textPrimary)
+
+            if checklistItems.count > 1 {
+                Button {
+                    removeChecklistItem(item.id)
+                } label: {
+                    Image("xmarkwavy")
+                        .renderingMode(.template)
+                        .resizable()
+                        .scaledToFit()
+                        .foregroundStyle(LColors.textSecondary.opacity(0.75))
+                        .frame(width: 18, height: 18)
+                }
+                .buttonStyle(.plain)
+            }
+        }
+        .padding(.horizontal, 10)
+        .padding(.vertical, 10)
+        .background(LColors.glassSurface2, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: 14, style: .continuous)
+                .strokeBorder(Color.white.opacity(0.08), lineWidth: 1)
+        )
+    }
+
+    private var nonEmptyChecklistItems: [LureliaReminderChecklistItem] {
+        checklistItems.filter { !$0.title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
+    }
+
+    private func checklistTitleBinding(for id: UUID) -> Binding<String> {
+        Binding(
+            get: {
+                checklistItems.first(where: { $0.id == id })?.title ?? ""
+            },
+            set: { newValue in
+                guard let index = checklistItems.firstIndex(where: { $0.id == id }) else { return }
+                checklistItems[index].title = newValue
+                checklistItems[index].updatedAt = Date()
+                emptyChecklistSubmitCount = 0
+            }
+        )
+    }
+
+    private func addChecklistItemAndFocus() {
+        withAnimation(.spring(response: 0.28, dampingFraction: 0.86)) {
+            let newItem = LureliaReminderChecklistItem(
+                title: "",
+                sortOrder: checklistItems.count
+            )
+            checklistItems.append(newItem)
+            focusedChecklistItemID = newItem.id
+            emptyChecklistSubmitCount = 0
+        }
+    }
+
+    private func handleChecklistSubmit(for id: UUID) {
+        let trimmed = checklistItems.first(where: { $0.id == id })?.title.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+
+        if trimmed.isEmpty {
+            emptyChecklistSubmitCount += 1
+
+            if emptyChecklistSubmitCount >= 2 {
+                focusedChecklistItemID = nil
+                emptyChecklistSubmitCount = 0
+            }
+
+            return
+        }
+
+        emptyChecklistSubmitCount = 0
+        addChecklistItemAndFocus()
+    }
+
+    private func removeChecklistItem(_ id: UUID) {
+        withAnimation(.spring(response: 0.28, dampingFraction: 0.86)) {
+            checklistItems.removeAll { $0.id == id }
+
+            if checklistItems.isEmpty {
+                checklistItems = [LureliaReminderChecklistItem(title: "", sortOrder: 0)]
+            }
+
+            normalizeChecklistSortOrder()
+        }
+    }
+
+    private func normalizeChecklistSortOrder() {
+        for index in checklistItems.indices {
+            checklistItems[index].sortOrder = index
+            checklistItems[index].updatedAt = Date()
+        }
+    }
+
     private var additionalFireTimesSection: some View {
         VStack(alignment: .leading, spacing: 14) {
             if additionalFireTimes.isEmpty {
@@ -441,6 +689,166 @@ struct AddReminderView: View {
     
     
     
+    private var locationField: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text("Location")
+                .font(.system(size: 13, weight: .bold, design: .rounded))
+                .foregroundStyle(LColors.textSecondary)
+
+            VStack(alignment: .leading, spacing: 14) {
+                TextField("Label (e.g. Home, Walmart, Work)", text: $locationLabel)
+                    .font(.system(size: 15, design: .rounded))
+                    .foregroundStyle(LColors.textPrimary)
+
+                if locationLatitude != nil {
+                    HStack(spacing: 8) {
+                        Image("lovelocation")
+                            .renderingMode(.template)
+                            .resizable().scaledToFit()
+                            .frame(width: 14, height: 14)
+                            .foregroundStyle(LGradients.header)
+
+                        Text(locationAddress.isEmpty ? "Location selected" : locationAddress)
+                            .font(.system(size: 12, design: .rounded))
+                            .foregroundStyle(LColors.textSecondary)
+                            .lineLimit(2)
+
+                        Spacer()
+
+                        Button {
+                            locationLatitude = nil
+                            locationLongitude = nil
+                            locationAddress = ""
+                        } label: {
+                            Image("xmarkwavy")
+                                .renderingMode(.template)
+                                .resizable().scaledToFit()
+                                .frame(width: 16, height: 16)
+                                .foregroundStyle(LColors.textSecondary.opacity(0.75))
+                        }
+                        .buttonStyle(.plain)
+                    }
+
+                    let lat = locationLatitude!
+                    let lon = locationLongitude!
+                    Map(initialPosition: .region(
+                        MKCoordinateRegion(
+                            center: CLLocationCoordinate2D(latitude: lat, longitude: lon),
+                            span: MKCoordinateSpan(latitudeDelta: 0.01, longitudeDelta: 0.01)
+                        )
+                    ), interactionModes: []) {
+                        Marker(locationLabel.isEmpty ? "Location" : locationLabel,
+                               coordinate: CLLocationCoordinate2D(latitude: lat, longitude: lon))
+                    }
+                    .frame(height: 140)
+                    .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 14, style: .continuous)
+                            .strokeBorder(.white.opacity(0.1), lineWidth: 1)
+                    )
+                    .allowsHitTesting(false)
+                }
+
+                // Search
+                TextField("Search for a location", text: $locationSearchText)
+                    .font(.system(size: 14, design: .rounded))
+                    .foregroundStyle(LColors.textPrimary)
+                    .onChange(of: locationSearchText) { _, newValue in
+                        searchLocation(query: newValue)
+                    }
+
+                if !locationSearchResults.isEmpty {
+                    VStack(spacing: 0) {
+                        ForEach(locationSearchResults.prefix(5), id: \.self) { item in
+                            Button {
+                                selectMapItem(item)
+                            } label: {
+                                HStack(spacing: 10) {
+                                    Image("lovelocation")
+                                        .renderingMode(.template)
+                                        .resizable().scaledToFit()
+                                        .frame(width: 14, height: 14)
+                                        .foregroundStyle(LGradients.header)
+
+                                    VStack(alignment: .leading, spacing: 2) {
+                                        Text(item.name ?? "Unknown")
+                                            .font(.system(size: 13, weight: .semibold, design: .rounded))
+                                            .foregroundStyle(LColors.textPrimary)
+                                            .lineLimit(1)
+                                        if let address = item.placemark.formattedAddress {
+                                            Text(address)
+                                                .font(.system(size: 11, design: .rounded))
+                                                .foregroundStyle(LColors.textSecondary)
+                                                .lineLimit(1)
+                                        }
+                                    }
+
+                                    Spacer()
+                                }
+                                .padding(.vertical, 10)
+                                .contentShape(Rectangle())
+                            }
+                            .buttonStyle(.plain)
+
+                            if item != locationSearchResults.prefix(5).last {
+                                Rectangle().fill(.white.opacity(0.06)).frame(height: 1)
+                            }
+                        }
+                    }
+                    .padding(.horizontal, 10)
+                    .background(LColors.glassSurface2, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 14, style: .continuous)
+                            .strokeBorder(Color.white.opacity(0.08), lineWidth: 1)
+                    )
+                }
+            }
+            .padding(14)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(LColors.glassSurface, in: RoundedRectangle(cornerRadius: 18))
+            .overlay(
+                RoundedRectangle(cornerRadius: 18)
+                    .strokeBorder(
+                        LinearGradient(
+                            colors: [
+                                LColors.gradientBlue.opacity(0.85),
+                                LColors.gradientPurple.opacity(0.85),
+                                Color.white.opacity(0.35)
+                            ],
+                            startPoint: .topLeading,
+                            endPoint: .bottomTrailing
+                        ),
+                        lineWidth: 1.1
+                    )
+            )
+        }
+    }
+
+    private func searchLocation(query: String) {
+        let trimmed = query.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard trimmed.count >= 3 else {
+            locationSearchResults = []
+            return
+        }
+        let request = MKLocalSearch.Request()
+        request.naturalLanguageQuery = trimmed
+        let search = MKLocalSearch(request: request)
+        search.start { response, _ in
+            locationSearchResults = response?.mapItems ?? []
+        }
+    }
+
+    private func selectMapItem(_ item: MKMapItem) {
+        locationLatitude = item.placemark.coordinate.latitude
+        locationLongitude = item.placemark.coordinate.longitude
+        locationAddress = item.placemark.formattedAddress ?? ""
+        if locationLabel.isEmpty {
+            locationLabel = item.name ?? ""
+        }
+        locationSearchText = ""
+        locationSearchResults = []
+    }
+
     private var repeatSection: some View {
         VStack(spacing: 14) {
             LazyVGrid(
@@ -587,6 +995,10 @@ struct AddReminderView: View {
             reminderMinute = components.minute ?? 0
         }
         additionalFireTimes = reminder.additionalFireTimes
+        let existingChecklist = reminder.checklistItems.sorted { $0.sortOrder < $1.sortOrder }
+        checklistItems = existingChecklist.isEmpty
+            ? [LureliaReminderChecklistItem(title: "", sortOrder: 0)]
+            : existingChecklist
 
         repeatUnit = reminder.repeatUnit
         repeatInterval = reminder.repeatInterval
@@ -596,6 +1008,19 @@ struct AddReminderView: View {
             repeatEnds = true
             self.repeatEndsAt = repeatEndsAt
         }
+
+        // Detail fields
+        purpose = reminder.purpose ?? ""
+        importance = reminder.importance ?? ""
+        reminderOutcome = reminder.reminderOutcome ?? ""
+        temptationNeed = reminder.temptationNeed ?? ""
+        temptationWant = reminder.temptationWant ?? ""
+
+        // Location
+        locationLabel = reminder.locationLabel ?? ""
+        locationAddress = reminder.locationAddress ?? ""
+        locationLatitude = reminder.locationLatitude
+        locationLongitude = reminder.locationLongitude
     }
     
     private func save() {
@@ -605,6 +1030,10 @@ struct AddReminderView: View {
         let cleanNotes = notes.trimmingCharacters(in: .whitespacesAndNewlines)
 
         let reminder: LureliaReminder
+        let isCreatingNewReminder = editingReminder == nil
+        let existingScheduleKey = editingReminder.map { scheduleKey(for: $0) }
+        let newScheduleKey = currentScheduleKey()
+        let scheduleDidChange = isCreatingNewReminder || existingScheduleKey != newScheduleKey
 
         if let editingReminder {
             reminder = editingReminder
@@ -619,8 +1048,6 @@ struct AddReminderView: View {
                 repeatUnit: repeatUnit,
                 repeatInterval: repeatInterval
             )
-
-            modelContext.insert(reminder)
         }
 
         reminder.title = cleanTitle
@@ -634,33 +1061,234 @@ struct AddReminderView: View {
         reminder.repeatWeekdays = Array(repeatWeekdays).sorted()
         reminder.repeatEndsAt = repeatEnds ? repeatEndsAt : nil
         reminder.additionalFireTimes = additionalFireTimes
-        reminder.nextFireAt = scheduledDate
+
+        // Detail fields
+        reminder.purpose = purpose.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? nil : purpose.trimmingCharacters(in: .whitespacesAndNewlines)
+        reminder.importance = importance.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? nil : importance.trimmingCharacters(in: .whitespacesAndNewlines)
+        reminder.reminderOutcome = reminderOutcome.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? nil : reminderOutcome.trimmingCharacters(in: .whitespacesAndNewlines)
+        reminder.temptationNeed = temptationNeed.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? nil : temptationNeed.trimmingCharacters(in: .whitespacesAndNewlines)
+        reminder.temptationWant = temptationWant.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? nil : temptationWant.trimmingCharacters(in: .whitespacesAndNewlines)
+
+        // Location
+        reminder.locationLabel = locationLabel.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? nil : locationLabel.trimmingCharacters(in: .whitespacesAndNewlines)
+        reminder.locationAddress = locationAddress.isEmpty ? nil : locationAddress
+        reminder.locationLatitude = locationLatitude
+        reminder.locationLongitude = locationLongitude
+
+        reminder.checklistItems = nonEmptyChecklistItems.enumerated().map { index, item in
+            LureliaReminderChecklistItem(
+                id: item.id,
+                title: item.title.trimmingCharacters(in: .whitespacesAndNewlines),
+                isCompleted: item.isCompleted,
+                sortOrder: index,
+                createdAt: item.createdAt,
+                updatedAt: Date()
+            )
+        }
+        if scheduleDidChange {
+            reminder.nextFireAt = nextUnfiredDateFromCurrentForm()
+        }
         reminder.isEnabled = true
         reminder.updatedAt = Date()
+
+        // Only rewrite the configured primary fire time when creating or changing the schedule.
+        if isCreatingNewReminder || scheduleDidChange || reminder.primaryHour == -1 {
+            reminder.primaryHour = reminderHour
+            reminder.primaryMinute = reminderMinute
+        }
 
         // Store all fire times as HH:mm strings — single source of truth
         var allTimes: [String] = [String(format: "%02d:%02d", reminderHour, reminderMinute)]
         for ft in additionalFireTimes {
             allTimes.append(String(format: "%02d:%02d", ft.hour, ft.minute))
         }
-        reminder.timesOfDay = allTimes
+        reminder.timesOfDay = Array(Set(allTimes)).sorted()
 
-        // Preserve originally configured primary fire time
-        if editingReminder == nil {
-            reminder.primaryHour = reminderHour
-            reminder.primaryMinute = reminderMinute
-        } else if reminder.primaryHour == -1 {
-            reminder.primaryHour = reminderHour
-            reminder.primaryMinute = reminderMinute
+        let descriptor = FetchDescriptor<LureliaReminder>()
+        let existingReminders = (try? modelContext.fetch(descriptor)) ?? []
+        let duplicateMatches = existingReminders.filter { existing in
+            existing.persistentModelID != reminder.persistentModelID &&
+            existing.isDuplicateConfiguration(of: reminder)
+        }
+
+        for duplicate in duplicateMatches {
+            LureliaNotificationManager.shared.cancelReminder(duplicate)
+            modelContext.delete(duplicate)
+        }
+
+        if isCreatingNewReminder {
+            modelContext.insert(reminder)
         }
 
         try? modelContext.save()
-        if editingReminder == nil { onCreated?(reminder) }
+        if isCreatingNewReminder { onCreated?(reminder) }
+
+        WidgetCenter.shared.reloadTimelines(ofKind: "LureliaDueRemindersWidget")
 
         Task {
             await LureliaNotificationManager.shared.scheduleReminder(reminder)
+            WidgetCenter.shared.reloadTimelines(ofKind: "LureliaDueRemindersWidget")
         }
 
         dismiss()
+    }
+
+    private func currentScheduleKey() -> String {
+        let normalizedAdditionalTimes = additionalFireTimes
+            .map { String(format: "%02d:%02d", $0.hour, $0.minute) }
+            .sorted()
+            .joined(separator: ",")
+
+        let normalizedWeekdays = repeatWeekdays
+            .sorted()
+            .map(String.init)
+            .joined(separator: ",")
+
+        let endDateKey = repeatEnds
+            ? String(Int(repeatEndsAt.timeIntervalSince1970))
+            : "none"
+
+        return [
+            String(Int(scheduledDate.timeIntervalSince1970)),
+            String(format: "%02d:%02d", reminderHour, reminderMinute),
+            normalizedAdditionalTimes,
+            repeatUnit.rawValue,
+            String(max(1, repeatInterval)),
+            normalizedWeekdays,
+            endDateKey
+        ].joined(separator: "|")
+    }
+
+    private func nextUnfiredDateFromCurrentForm(now: Date = Date()) -> Date {
+        let calendar = Calendar.current
+        let sortedFireTimes = allCurrentFireTimes()
+
+        for fireTime in sortedFireTimes {
+            var components = calendar.dateComponents([.year, .month, .day], from: reminderDate)
+            components.hour = fireTime.hour
+            components.minute = fireTime.minute
+            components.second = 0
+
+            guard let candidate = calendar.date(from: components) else { continue }
+
+            if candidate > now {
+                return candidate
+            }
+        }
+
+        if repeatUnit != .none,
+           let nextRepeatDate = nextRepeatDateAfterCurrentReminderDate() {
+            let firstFireTime = sortedFireTimes.first ?? (hour: reminderHour, minute: reminderMinute)
+            var components = calendar.dateComponents([.year, .month, .day], from: nextRepeatDate)
+            components.hour = firstFireTime.hour
+            components.minute = firstFireTime.minute
+            components.second = 0
+
+            return calendar.date(from: components) ?? scheduledDate
+        }
+
+        return scheduledDate
+    }
+
+    private func allCurrentFireTimes() -> [(hour: Int, minute: Int)] {
+        var fireTimes: [(hour: Int, minute: Int)] = [
+            (hour: reminderHour, minute: reminderMinute)
+        ]
+
+        fireTimes.append(contentsOf: additionalFireTimes.map { additionalTime in
+            (hour: additionalTime.hour, minute: additionalTime.minute)
+        })
+
+        return fireTimes
+            .reduce(into: [(hour: Int, minute: Int)]()) { uniqueTimes, fireTime in
+                guard !uniqueTimes.contains(where: { $0.hour == fireTime.hour && $0.minute == fireTime.minute }) else { return }
+                uniqueTimes.append(fireTime)
+            }
+            .sorted { lhs, rhs in
+                if lhs.hour == rhs.hour {
+                    return lhs.minute < rhs.minute
+                }
+                return lhs.hour < rhs.hour
+            }
+    }
+
+    private func nextRepeatDateAfterCurrentReminderDate() -> Date? {
+        let calendar = Calendar.current
+        let interval = max(1, repeatInterval)
+
+        switch repeatUnit {
+        case .none:
+            return nil
+        case .minutes, .hours:
+            return calendar.date(byAdding: .day, value: 1, to: reminderDate)
+        case .days:
+            return calendar.date(byAdding: .day, value: interval, to: reminderDate)
+        case .weeks:
+            if !repeatWeekdays.isEmpty {
+                let todayStart = calendar.startOfDay(for: reminderDate)
+
+                for dayOffset in 1...14 {
+                    guard let candidate = calendar.date(byAdding: .day, value: dayOffset, to: todayStart) else { continue }
+                    let weekday = calendar.component(.weekday, from: candidate)
+
+                    if repeatWeekdays.contains(weekday) {
+                        return candidate
+                    }
+                }
+            }
+
+            return calendar.date(byAdding: .weekOfYear, value: interval, to: reminderDate)
+        case .months:
+            return calendar.date(byAdding: .month, value: interval, to: reminderDate)
+        case .years:
+            return calendar.date(byAdding: .year, value: interval, to: reminderDate)
+        }
+    }
+
+    private func scheduleKey(for reminder: LureliaReminder) -> String {
+        let primaryHour = reminder.primaryHour != -1
+            ? reminder.primaryHour
+            : Calendar.current.component(.hour, from: reminder.scheduledDate)
+
+        let primaryMinute = reminder.primaryHour != -1
+            ? reminder.primaryMinute
+            : Calendar.current.component(.minute, from: reminder.scheduledDate)
+
+        let normalizedAdditionalTimes = reminder.additionalFireTimes
+            .map { String(format: "%02d:%02d", $0.hour, $0.minute) }
+            .sorted()
+            .joined(separator: ",")
+
+        let normalizedWeekdays = reminder.repeatWeekdays
+            .sorted()
+            .map(String.init)
+            .joined(separator: ",")
+
+        let endDateKey = reminder.repeatEndsAt.map { String(Int($0.timeIntervalSince1970)) } ?? "none"
+
+        return [
+            String(Int(reminder.scheduledDate.timeIntervalSince1970)),
+            String(format: "%02d:%02d", primaryHour, primaryMinute),
+            normalizedAdditionalTimes,
+            reminder.repeatUnit.rawValue,
+            String(max(1, reminder.repeatInterval)),
+            normalizedWeekdays,
+            endDateKey
+        ].joined(separator: "|")
+    }
+}
+
+// MARK: - CLPlacemark Address Helper
+
+extension CLPlacemark {
+    var formattedAddress: String? {
+        let parts = [
+            subThoroughfare,
+            thoroughfare,
+            locality,
+            administrativeArea,
+            postalCode
+        ].compactMap { $0 }
+        return parts.isEmpty ? nil : parts.joined(separator: " ")
     }
 }

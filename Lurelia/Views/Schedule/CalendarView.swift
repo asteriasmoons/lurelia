@@ -28,55 +28,23 @@ struct CalendarView: View {
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 16) {
-            header
+        GlassCard {
+            VStack(alignment: .leading, spacing: 16) {
+                header
 
-            LazyVGrid(columns: columns, spacing: 8) {
-                ForEach(weekdaySymbols, id: \.self) { symbol in
-                    Text(symbol.uppercased())
-                        .font(.system(size: 11, weight: .black, design: .rounded))
-                        .foregroundStyle(LColors.textSecondary.opacity(0.65))
-                        .frame(maxWidth: .infinity)
-                }
+                LazyVGrid(columns: columns, spacing: 8) {
+                    ForEach(weekdaySymbols, id: \.self) { symbol in
+                        Text(symbol.uppercased())
+                            .font(.system(size: 11, weight: .black, design: .rounded))
+                            .foregroundStyle(LColors.textSecondary.opacity(0.65))
+                            .frame(maxWidth: .infinity)
+                    }
 
-                ForEach(days) { day in
-                    dayBubble(day)
+                    ForEach(days) { day in
+                        dayBubble(day)
+                    }
                 }
             }
-        }
-        .padding(16)
-        .background {
-            RoundedRectangle(cornerRadius: 24, style: .continuous)
-                .fill(LColors.glassSurface)
-                .overlay {
-                    RoundedRectangle(cornerRadius: 24, style: .continuous)
-                        .fill(
-                            LinearGradient(
-                                colors: [
-                                    LColors.gradientBlue.opacity(0.12),
-                                    LColors.gradientPurple.opacity(0.14),
-                                    Color.white.opacity(0.02)
-                                ],
-                                startPoint: .topLeading,
-                                endPoint: .bottomTrailing
-                            )
-                        )
-                }
-                .overlay {
-                    RoundedRectangle(cornerRadius: 24, style: .continuous)
-                        .strokeBorder(
-                            LinearGradient(
-                                colors: [
-                                    LColors.gradientBlue.opacity(0.95),
-                                    LColors.gradientPurple.opacity(0.95),
-                                    Color.white.opacity(0.55)
-                                ],
-                                startPoint: .topLeading,
-                                endPoint: .bottomTrailing
-                            ),
-                            lineWidth: 1.4
-                        )
-                }
         }
         .padding(.horizontal, 20)
     }

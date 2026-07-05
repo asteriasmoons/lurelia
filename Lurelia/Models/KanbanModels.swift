@@ -10,6 +10,7 @@ import SwiftData
 
 enum KanbanCardType: String, Codable {
     case reminder = "reminder"
+    case routineTask = "routineTask"
 }
 
 // MARK: - KanbanBoard
@@ -87,7 +88,7 @@ final class KanbanCard {
 
     init(cardType: KanbanCardType, itemID: UUID, sortOrder: Int = 0) {
         self.id        = UUID()
-        self.cardType  = .reminder
+        self.cardType  = cardType
         self.itemID    = itemID.uuidString
         self.sortOrder = sortOrder
         self.createdAt = Date()

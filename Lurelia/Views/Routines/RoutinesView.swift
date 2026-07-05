@@ -5,9 +5,11 @@
 
 import SwiftUI
 import SwiftData
+import WidgetKit
 
 struct RoutinesView: View {
     @Environment(\.modelContext) private var modelContext
+    @Environment(\.scenePhase) private var scenePhase
     
     @Query(sort: \LureliaRoutine.sortOrder)
     private var routines: [LureliaRoutine]
@@ -15,6 +17,7 @@ struct RoutinesView: View {
     @State private var showAdd = false
     @State private var activeRoutine: LureliaRoutine? = nil
     @State private var editRoutine: LureliaRoutine? = nil
+    @State private var refreshID = UUID()
     
     var body: some View {
         NavigationStack {
@@ -29,7 +32,7 @@ struct RoutinesView: View {
                         HStack {
                             VStack(alignment: .leading, spacing: 4) {
                                 Text("Routines")
-                                    .font(.system(size: 30, weight: .bold, design: .rounded))
+                                    .font(.system(size: 30, weight: .black, design: .rounded))
                                     .foregroundStyle(.white)
                                 
                                 Text("Build flexible flows you can start, pause, and complete.")
@@ -47,7 +50,7 @@ struct RoutinesView: View {
                                     .resizable()
                                     .scaledToFit()
                                     .frame(width: 30, height: 30)
-                                    .foregroundStyle(LGradients.header)
+                                    .foregroundStyle(.white)
                             }
                             .buttonStyle(.plain)
                         }
@@ -59,7 +62,7 @@ struct RoutinesView: View {
                                 emptyState
                             } else {
                                 ForEach(routines) { routine in
-                                    NavigationLink(destination: RoutineDetailView(routine: routine)) {
+                                    NavigationLink(destination: RoutineDetailView(routineID: routine.id, refreshID: UUID())) {
                                         RoutineCard(
                                             routine: routine,
                                             onRun: {
@@ -118,6 +121,17 @@ struct RoutinesView: View {
             }
             .fullScreenCover(item: $activeRoutine) { routine in
                 RoutineRunView(routine: routine)
+            }
+            .id(refreshID)
+            .onChange(of: scenePhase) { newPhase in
+                if newPhase == .active {
+                    modelContext.rollback()
+                    refreshID = UUID()
+                }
+            }
+            .onReceive(NotificationCenter.default.publisher(for: UIApplication.didBecomeActiveNotification)) { _ in
+                modelContext.rollback()
+                refreshID = UUID()
             }
         }
     }

@@ -15,12 +15,18 @@ struct KanbanCardPickerView: View {
     @Bindable var column: KanbanColumn
 
     let allReminders: [LureliaReminder]
+    var allRoutineTasks: [LureliaRoutineTask] = []
 
     var onCreateReminder: () -> Void
 
-    // Already-pinned IDs
+    @State private var selectedTab = 0
+
     private var pinnedReminderIDs: Set<String> {
         Set((column.cards ?? []).filter { $0.cardType == .reminder }.map { $0.itemID })
+    }
+
+    private var pinnedRoutineTaskIDs: Set<String> {
+        Set((column.cards ?? []).filter { $0.cardType == .routineTask }.map { $0.itemID })
     }
 
     private var availableReminders: [LureliaReminder] {
@@ -28,25 +34,28 @@ struct KanbanCardPickerView: View {
             .sorted { $0.title < $1.title }
     }
 
+    private var availableRoutineTasks: [LureliaRoutineTask] {
+        allRoutineTasks.filter { !pinnedRoutineTaskIDs.contains($0.stableTaskID) }
+            .sorted { ($0.routine?.name ?? "") < ($1.routine?.name ?? "") }
+    }
+
     var body: some View {
         ZStack {
             LureliaBackground()
 
             VStack(spacing: 0) {
-                // Handle
                 RoundedRectangle(cornerRadius: 3)
                     .fill(.white.opacity(0.3))
                     .frame(width: 40, height: 5)
                     .padding(.top, 12)
                     .padding(.bottom, 16)
 
-                // Header
                 HStack {
                     VStack(alignment: .leading, spacing: 4) {
-                        Text("Add Reminder")
+                        Text("Add Card")
                             .font(.system(size: 26, weight: .bold, design: .rounded))
                             .foregroundStyle(.white)
-                        Text("Pick an existing reminder or create a new one.")
+                        Text("Pick a reminder or routine task to add.")
                             .font(.system(size: 13, design: .rounded))
                             .foregroundStyle(.white.opacity(0.45))
                     }
@@ -60,54 +69,91 @@ struct KanbanCardPickerView: View {
                 .padding(.horizontal, 24)
                 .padding(.bottom, 16)
 
-                Button {
-                    dismiss()
-                    onCreateReminder()
-                } label: {
-                    HStack(spacing: 10) {
-                        Image("bellfill")
-                            .renderingMode(.template)
-                            .resizable()
-                            .scaledToFit()
-                            .frame(width: 18, height: 18)
-                            .foregroundStyle(LGradients.header)
-
-                        Text("New Reminder")
-                            .font(.system(size: 14, weight: .bold, design: .rounded))
-                            .foregroundStyle(LColors.textSecondary)
-
-                        Spacer()
-                    }
-                    .frame(maxWidth: .infinity)
-                    .padding(.horizontal, 16)
-                    .padding(.vertical, 14)
-                    .background(LColors.glassSurface, in: RoundedRectangle(cornerRadius: 16))
-                    .overlay(RoundedRectangle(cornerRadius: 16).strokeBorder(LColors.glassBorder, lineWidth: 1))
+                // Tab selector
+                HStack(spacing: 8) {
+                    tabButton(title: "Reminders", index: 0)
+                    tabButton(title: "Routine Tasks", index: 1)
                 }
-                .buttonStyle(.plain)
                 .padding(.horizontal, 24)
-                .padding(.bottom, 16)
+                .padding(.bottom, 12)
 
                 Divider().overlay(LColors.glassBorder)
 
                 ScrollView(showsIndicators: false) {
                     VStack(spacing: 10) {
-                        if availableReminders.isEmpty {
-                            emptyPicker(label: "No reminders available")
+                        if selectedTab == 0 {
+                            Button {
+                                dismiss()
+                                onCreateReminder()
+                            } label: {
+                                HStack(spacing: 10) {
+                                    Image("bellfill")
+                                        .renderingMode(.template).resizable().scaledToFit()
+                                        .frame(width: 18, height: 18).foregroundStyle(LGradients.header)
+                                    Text("New Reminder")
+                                        .font(.system(size: 14, weight: .bold, design: .rounded))
+                                        .foregroundStyle(LColors.textSecondary)
+                                    Spacer()
+                                }
+                                .frame(maxWidth: .infinity)
+                                .padding(.horizontal, 16).padding(.vertical, 14)
+                                .background(LColors.glassSurface, in: RoundedRectangle(cornerRadius: 16))
+                                .overlay(RoundedRectangle(cornerRadius: 16).strokeBorder(LColors.glassBorder, lineWidth: 1))
+                            }
+                            .buttonStyle(.plain)
+
+                            if availableReminders.isEmpty {
+                                emptyPicker(label: "No reminders available")
+                            } else {
+                                ForEach(availableReminders) { reminder in
+                                    existingReminderRow(reminder)
+                                }
+                            }
                         } else {
-                            ForEach(availableReminders) { reminder in
-                                existingReminderRow(reminder)
+                            if availableRoutineTasks.isEmpty {
+                                emptyPicker(label: "No routine tasks available")
+                            } else {
+                                ForEach(availableRoutineTasks, id: \.stableTaskID) { task in
+                                    routineTaskRow(task)
+                                }
                             }
                         }
                     }
                     .padding(.horizontal, 24)
+                    .padding(.vertical, 16)
                     .padding(.bottom, 60)
                 }
             }
         }
     }
 
-    // MARK: Existing rows
+    private func tabButton(title: String, index: Int) -> some View {
+        Button {
+            withAnimation(.spring(response: 0.25, dampingFraction: 0.8)) {
+                selectedTab = index
+            }
+        } label: {
+            Text(title)
+                .font(.system(size: 13, weight: .bold, design: .rounded))
+                .foregroundStyle(selectedTab == index ? .white : LColors.textSecondary)
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, 10)
+                .background(
+                    selectedTab == index
+                    ? AnyShapeStyle(LGradients.header)
+                    : AnyShapeStyle(LColors.glassSurface),
+                    in: RoundedRectangle(cornerRadius: 12)
+                )
+                .overlay(
+                    RoundedRectangle(cornerRadius: 12)
+                        .strokeBorder(
+                            selectedTab == index ? LColors.glassBorderStrong : LColors.glassBorder,
+                            lineWidth: 1
+                        )
+                )
+        }
+        .buttonStyle(.plain)
+    }
 
     private func existingReminderRow(_ reminder: LureliaReminder) -> some View {
         Button { addCard(type: .reminder, itemID: reminder.id.uuidString) } label: {
@@ -117,17 +163,13 @@ struct KanbanCardPickerView: View {
                         .fill(LColors.gradientPurple.opacity(0.14))
                         .frame(width: 38, height: 38)
                     Image("bellfill")
-                        .renderingMode(.template)
-                        .resizable()
-                        .scaledToFit()
-                        .frame(width: 16, height: 16)
-                        .foregroundStyle(LColors.gradientPurple)
+                        .renderingMode(.template).resizable().scaledToFit()
+                        .frame(width: 16, height: 16).foregroundStyle(LColors.gradientPurple)
                 }
                 VStack(alignment: .leading, spacing: 3) {
                     Text(reminder.title)
                         .font(.system(size: 14, weight: .bold, design: .rounded))
-                        .foregroundStyle(LColors.textPrimary)
-                        .lineLimit(1)
+                        .foregroundStyle(LColors.textPrimary).lineLimit(1)
                     Text(reminder.scheduledDate.formatted(date: .abbreviated, time: .shortened))
                         .font(.system(size: 11, weight: .semibold, design: .rounded))
                         .foregroundStyle(LColors.textSecondary)
@@ -144,6 +186,38 @@ struct KanbanCardPickerView: View {
         .buttonStyle(.plain)
     }
 
+    private func routineTaskRow(_ task: LureliaRoutineTask) -> some View {
+        Button { addCard(type: .routineTask, itemID: task.stableTaskID) } label: {
+            HStack(spacing: 12) {
+                ZStack {
+                    RoundedRectangle(cornerRadius: 10)
+                        .fill(Color(lureliaHex: task.routine?.colorHex ?? "#7d19f7").opacity(0.14))
+                        .frame(width: 38, height: 38)
+                    LureliaIconView(iconId: task.icon, size: 16)
+                        .foregroundStyle(Color(lureliaHex: task.routine?.colorHex ?? "#7d19f7"))
+                }
+                VStack(alignment: .leading, spacing: 3) {
+                    Text(task.title)
+                        .font(.system(size: 14, weight: .bold, design: .rounded))
+                        .foregroundStyle(LColors.textPrimary).lineLimit(1)
+                    if let routine = task.routine {
+                        Text(routine.name)
+                            .font(.system(size: 11, weight: .semibold, design: .rounded))
+                            .foregroundStyle(LColors.textSecondary)
+                    }
+                }
+                Spacer()
+                Image(systemName: "plus.circle")
+                    .font(.system(size: 18, design: .rounded))
+                    .foregroundStyle(Color(lureliaHex: task.routine?.colorHex ?? "#7d19f7"))
+            }
+            .padding(12)
+            .background(LColors.glassSurface, in: RoundedRectangle(cornerRadius: 16))
+            .overlay(RoundedRectangle(cornerRadius: 16).strokeBorder(LColors.glassBorder, lineWidth: 1))
+        }
+        .buttonStyle(.plain)
+    }
+
     private func emptyPicker(label: String) -> some View {
         Text(label)
             .font(.system(size: 14, design: .rounded))
@@ -152,15 +226,12 @@ struct KanbanCardPickerView: View {
             .padding(.vertical, 32)
     }
 
-    // MARK: Pin existing item
-
     private func addCard(type: KanbanCardType, itemID: String) {
-        let card = KanbanCard(cardType: .reminder, itemID: UUID(), sortOrder: (column.cards ?? []).count)
+        let card = KanbanCard(cardType: type, itemID: UUID(), sortOrder: (column.cards ?? []).count)
         card.itemID = itemID
+        card.cardType = type
         modelContext.insert(card)
-        if column.cards == nil {
-            column.cards = []
-        }
+        if column.cards == nil { column.cards = [] }
         column.cards?.append(card)
         try? modelContext.save()
         dismiss()

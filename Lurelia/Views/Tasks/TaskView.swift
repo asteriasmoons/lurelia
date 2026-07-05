@@ -85,7 +85,7 @@ struct TasksView: View {
                     HStack {
                         VStack(alignment: .leading, spacing: 4) {
                             Text("Tasks")
-                                .font(.system(size: 30, weight: .bold, design: .rounded))
+                                .font(.system(size: 30, weight: .black, design: .rounded))
                                 .foregroundStyle(.white)
                             
                             Text(autoClearTasks ? "Today’s selected tasks" : "Your active task list")
@@ -409,11 +409,11 @@ struct LureliaTaskCategoryCard: View {
         case "Health":
             return ("health", "Medication, hydration, sleep, and body care")
         case "Fitness":
-            return ("dumbbell", "Movement, stretching, exercise, and physical strength")
+            return ("weight", "Movement, stretching, exercise, and physical strength")
         case "Home":
             return ("houseoutline", "Cleaning, meals, chores, and home maintenance")
         case "Work":
-            return ("briefcase.fill", "Work tasks, focus sessions, and admin upkeep")
+            return ("casemagic", "Work tasks, focus sessions, and admin upkeep")
         case "Study":
             return ("book.fill", "Lessons, notes, review, and learning sessions")
         case "Care":
@@ -464,7 +464,8 @@ struct LureliaTaskCategoryCard: View {
     }
     
     var body: some View {
-        VStack(spacing: 0) {
+        GlassCard(cornerRadius: 18) {
+            VStack(spacing: 0) {
             
             // MARK: - Collapsed Header
             
@@ -484,8 +485,25 @@ struct LureliaTaskCategoryCard: View {
                         }
                         .foregroundStyle(LGradients.header)
                         .frame(width: 42, height: 42)
-                        .background(.white.opacity(0.08))
-                        .clipShape(RoundedRectangle(cornerRadius: 12))
+                        .background(
+                            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                                .fill(Color.white.opacity(0.14))
+                                .overlay(
+                                    RoundedRectangle(cornerRadius: 12, style: .continuous)
+                                        .strokeBorder(
+                                            LinearGradient(
+                                                colors: [
+                                                    LColors.gradientBlue.opacity(0.95),
+                                                    LColors.gradientPurple.opacity(0.95),
+                                                    Color.white.opacity(0.45)
+                                                ],
+                                                startPoint: .topLeading,
+                                                endPoint: .bottomTrailing
+                                            ),
+                                            lineWidth: 1.2
+                                        )
+                                )
+                        )
                         
                         VStack(alignment: .leading, spacing: 3) {
                             Text(category)
@@ -540,14 +558,13 @@ struct LureliaTaskCategoryCard: View {
                     }
                     .frame(height: 6)
                 }
-                .padding(16)
             
             // MARK: - Expanded Tasks
             
             if isExpanded {
                 VStack(spacing: 0) {
                     Rectangle()
-                        .fill(.white.opacity(0.07))
+                        .fill(.white.opacity(0.09))
                         .frame(height: 1)
                         .padding(.horizontal, 16)
                     
@@ -556,7 +573,7 @@ struct LureliaTaskCategoryCard: View {
                         
                         if task.id != sortedTasks.last?.id {
                             Rectangle()
-                                .fill(.white.opacity(0.05))
+                                .fill(.white.opacity(0.07))
                                 .frame(height: 1)
                                 .padding(.horizontal, 16)
                         }
@@ -564,24 +581,8 @@ struct LureliaTaskCategoryCard: View {
                 }
                 .transition(.opacity.combined(with: .move(edge: .top)))
             }
+           }
         }
-        .background(LColors.glassSurface)
-        .clipShape(RoundedRectangle(cornerRadius: 18))
-        .overlay(
-            RoundedRectangle(cornerRadius: 18)
-                .strokeBorder(
-                    LinearGradient(
-                        colors: [
-                            LColors.gradientBlue.opacity(0.95),
-                            LColors.gradientPurple.opacity(0.95),
-                            Color.white.opacity(0.55)
-                        ],
-                        startPoint: .topLeading,
-                        endPoint: .bottomTrailing
-                    ),
-                    lineWidth: 1.15
-                )
-        )
     }
 }
 
@@ -589,63 +590,145 @@ struct LureliaTaskCategoryCard: View {
 
 struct LureliaTaskRow: View {
     let task: LureliaTask
-    
+
     @Environment(\.modelContext) private var context
     @StateObject private var taskManager = TaskManager.shared
-    
+    @State private var dragOffset: CGFloat = 0
+    @State private var isShowingRemoveAction = false
+
     var subtitleText: String {
         if let notes = task.trimmedNotes {
             return notes
         }
-        
         return task.isCustom ? "Custom task" : "Task bank"
     }
 
     var statusLabel: String {
         task.isCustom ? "Custom" : "Task Bank"
     }
-    
+
     var body: some View {
-        HStack(spacing: 14) {
-            
-            // MARK: - Completion Circle
-            
+        ZStack(alignment: .trailing) {
             Button {
-                toggleComplete()
+                removeFromTaskList()
             } label: {
                 ZStack {
                     Circle()
-                        .fill(
-                            task.isCompleted
-                            ? AnyShapeStyle(LGradients.header)
-                            : AnyShapeStyle(Color.clear)
-                        )
-                        .frame(width: 30, height: 30)
-                        .overlay(
-                            Circle()
-                                .stroke(
-                                    task.isCompleted ? Color.clear : Color.white.opacity(0.3),
-                                    lineWidth: 1.5
-                                )
-                        )
-                    
-                    if task.isCompleted {
-                        Image(systemName: "checkmark")
-                            .font(.system(size: 13, weight: .bold))
-                            .foregroundStyle(.white)
-                    }
+                        .fill(LGradients.header)
+                        .frame(width: 38, height: 38)
+
+                    Image("xmarkwavy")
+                        .renderingMode(.template)
+                        .resizable()
+                        .scaledToFit()
+                        .frame(width: 16, height: 16)
+                        .foregroundStyle(.white)
                 }
-                .frame(width: 48, height: 48)
+                .frame(width: 76, height: 64)
                 .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
-            
+            .padding(.trailing, 6)
+            .opacity(isShowingRemoveAction ? 1 : 0)
+
+            taskRowContent
+                .offset(x: dragOffset)
+                .simultaneousGesture(
+                    DragGesture(minimumDistance: 32)
+                        .onChanged { value in
+                            let horizontalAmount = abs(value.translation.width)
+                            let verticalAmount = abs(value.translation.height)
+
+                            guard horizontalAmount > 65 else { return }
+                            guard horizontalAmount > verticalAmount * 2.4 else { return }
+                            guard value.translation.width < 0 else { return }
+
+                            dragOffset = max(value.translation.width, -86)
+                            isShowingRemoveAction = dragOffset < -30
+                        }
+                        .onEnded { value in
+                            let horizontalAmount = abs(value.translation.width)
+                            let verticalAmount = abs(value.translation.height)
+
+                            guard horizontalAmount > 65,
+                                  horizontalAmount > verticalAmount * 2.4 else {
+                                withAnimation(.spring(duration: 0.28, bounce: 0.12)) {
+                                    dragOffset = 0
+                                    isShowingRemoveAction = false
+                                }
+                                return
+                            }
+
+                            withAnimation(.spring(duration: 0.28, bounce: 0.12)) {
+                                if value.translation.width < -110 {
+                                    dragOffset = -78
+                                    isShowingRemoveAction = true
+                                } else {
+                                    dragOffset = 0
+                                    isShowingRemoveAction = false
+                                }
+                            }
+                        }
+                )
+        }
+        .clipShape(Rectangle())
+        .animation(.spring(duration: 0.25), value: task.isCompleted)
+    }
+
+    private var taskRowContent: some View {
+        HStack(spacing: 14) {
+            ZStack {
+                Circle()
+                    .fill(
+                        task.isCompleted || task.isMarkedIncomplete
+                        ? AnyShapeStyle(LGradients.header)
+                        : AnyShapeStyle(Color.clear)
+                    )
+                    .frame(width: 30, height: 30)
+                    .overlay(
+                        Circle()
+                            .stroke(
+                                task.isCompleted || task.isMarkedIncomplete ? Color.clear : Color.white.opacity(0.3),
+                                lineWidth: 1.5
+                            )
+                    )
+
+                if task.isMarkedIncomplete {
+                    Image("xmarkwavy")
+                        .renderingMode(.template)
+                        .resizable()
+                        .scaledToFit()
+                        .frame(width: 13, height: 13)
+                        .foregroundStyle(.white)
+                } else if task.isCompleted {
+                    Image(systemName: "checkmark")
+                        .font(.system(size: 13, weight: .bold))
+                        .foregroundStyle(.white)
+                }
+            }
+            .frame(width: 48, height: 48)
+            .contentShape(Rectangle())
+            .onTapGesture(count: 2) {
+                withAnimation(.spring(duration: 0.25, bounce: 0.15)) {
+                    task.isMarkedIncomplete = true
+                    task.isCompleted = false
+                    task.updatedAt = Date()
+                    try? context.save()
+                }
+            }
+            .onTapGesture(count: 1) {
+                withAnimation(.spring(duration: 0.25, bounce: 0.15)) {
+                    task.isMarkedIncomplete = false
+                    toggleComplete()
+                }
+            }
+
             VStack(alignment: .leading, spacing: 5) {
                 HStack(alignment: .center, spacing: 10) {
                     Text(task.title)
                         .font(.system(size: 14, weight: .medium, design: .rounded))
-                        .foregroundStyle(task.isCompleted ? .white.opacity(0.4) : .white)
-                        .strikethrough(task.isCompleted, color: .white.opacity(0.3))
+                        .foregroundStyle(task.isCompleted || task.isMarkedIncomplete ? .white.opacity(0.4) : .white)
+                        .strikethrough(task.isCompleted || task.isMarkedIncomplete, color: .white.opacity(0.3))
                         .lineLimit(2)
 
                     Spacer(minLength: 8)
@@ -662,20 +745,20 @@ struct LureliaTaskRow: View {
                                 .font(.system(size: 11, weight: .black, design: .rounded))
                                 .monospacedDigit()
                         }
-                        .foregroundStyle(Color(lureliaHex: "#ffe6a3"))
+                        .foregroundStyle(Color(lureliaHex: "#6a1eff"))
                         .padding(.horizontal, 8)
                         .frame(height: 24)
                         .background(
                             Capsule()
-                                .fill(Color(lureliaHex: "#5a3b12").opacity(0.42))
+                                .fill(Color(lureliaHex: "#6a1eff").opacity(0.14))
                         )
                         .overlay(
                             Capsule()
-                                .strokeBorder(Color(lureliaHex: "#ffd36a").opacity(0.55), lineWidth: 1)
+                                .strokeBorder(Color(lureliaHex: "#6a1eff").opacity(0.55), lineWidth: 1)
                         )
                     }
                 }
-                
+
                 HStack(spacing: 6) {
                     Text(statusLabel)
                         .font(.system(size: 10, weight: .semibold, design: .rounded))
@@ -684,42 +767,33 @@ struct LureliaTaskRow: View {
                         .padding(.vertical, 3)
                         .background(LColors.gradientBlue.opacity(0.12))
                         .clipShape(Capsule())
-                    
+
                     Text("· \(subtitleText)")
                         .font(.system(size: 11, design: .rounded))
                         .foregroundStyle(.white.opacity(0.35))
                         .lineLimit(1)
                 }
             }
-        Spacer()
+
+            Spacer()
         }
-        .padding(.horizontal, 16)
-        .padding(.vertical, 8)
         .contentShape(Rectangle())
-        .onTapGesture {
-            toggleComplete()
-        }
-        .contextMenu {
-            Button {
-                task.isActive = false
-                task.updatedAt = Date()
-                try? context.save()
-            } label: {
-                Label("Hide Task", systemImage: "eye.slash")
-            }
-            
-            Button(role: .destructive) {
-                context.delete(task)
-                try? context.save()
-            } label: {
-                Label("Delete Task", systemImage: "trash")
-            }
-        }
-        .animation(.spring(duration: 0.25), value: task.isCompleted)
     }
-    
+
     func toggleComplete() {
+        task.isMarkedIncomplete = false
         taskManager.toggle(task: task, context: context)
     }
+
+    func removeFromTaskList() {
+        task.isSelectedToday = false
+        task.isCompleted = false
+        task.isMarkedIncomplete = false
+        task.updatedAt = Date()
+        dragOffset = 0
+        isShowingRemoveAction = false
+        try? context.save()
+    }
+
 }
 

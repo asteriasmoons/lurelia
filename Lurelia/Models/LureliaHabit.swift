@@ -15,6 +15,34 @@ enum LureliaHabitFrequency: String, Codable, CaseIterable {
     var label: String { rawValue }
 }
 
+// MARK: - Cue Type
+
+enum LureliaCueType: String, Codable, CaseIterable, Identifiable {
+    case visual = "Visual"
+    case object = "Object"
+    case location = "Location"
+    case time = "Time"
+    case person = "Person"
+    case sound = "Sound"
+    case existingHabit = "Existing Habit"
+
+    var id: String { rawValue }
+
+    var label: String { rawValue }
+
+    var iconName: String {
+        switch self {
+        case .visual: return "eye"
+        case .object: return "objects"
+        case .location: return "lovelocation"
+        case .time: return "clockwavy"
+        case .person: return "profilewavy"
+        case .sound: return "bells"
+        case .existingHabit: return "repeatarrows"
+        }
+    }
+}
+
 // MARK: - Habit
 
 @Model
@@ -28,7 +56,9 @@ final class LureliaHabit {
 
     var title: String = ""
     var details: String?
+    var iconName: String?
     var daysPerWeek: Int = 7
+    var activeWeekdaysStorage: String = "[1,2,3,4,5,6,7]"
     var timesPerDay: Int = 1
 
     // MARK: - State
@@ -44,6 +74,50 @@ final class LureliaHabit {
     // MARK: - Stats
 
     var statsResetAt: Date?
+
+    // MARK: - Blueprint: Identity & Purpose
+
+    var identityStatement: String?
+    var habitPurpose: String?
+
+    // MARK: - Blueprint: Implementation
+
+    var implementationIntention: String?
+
+    // MARK: - Blueprint: Cue
+
+    var cueTypeRaw: String?
+    var cueDescription: String?
+    var cueReason: String?
+
+    // MARK: - Blueprint: Environment
+
+    var currentEnvironment: String?
+    var idealEnvironment: String?
+    var environmentChanges: String?
+
+    // MARK: - Blueprint: Temptation Bundling
+
+    var temptationNeed: String?
+    var temptationWant: String?
+    
+    // MARK: - Blueprint: Friction
+
+    var friction: String?
+
+    // MARK: - Blueprint: Rules (JSON array)
+
+    var habitRulesStorage: String?
+
+    // MARK: - Blueprint: Obstacles & Solutions (JSON arrays)
+
+    var habitObstaclesStorage: String?
+    var habitSolutionsStorage: String?
+
+    // MARK: - Blueprint: Rewards
+
+    var immediateReward: String?
+    var longTermReward: String?
 
     // MARK: - Metadata
 
@@ -63,12 +137,14 @@ final class LureliaHabit {
     init(
         title: String,
         details: String? = nil,
+        iconName: String? = nil,
         daysPerWeek: Int = 7,
         timesPerDay: Int = 1
     ) {
         self.id = UUID()
         self.title = title
         self.details = details
+        self.iconName = iconName
         self.daysPerWeek = max(1, min(7, daysPerWeek))
         self.timesPerDay = max(1, timesPerDay)
         self.isArchived = false
@@ -87,6 +163,131 @@ extension LureliaHabit {
 
     var trimmedTitle: String {
         title.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    // MARK: - Blueprint computed helpers
+
+    var cueType: LureliaCueType? {
+        get {
+            guard let raw = cueTypeRaw else { return nil }
+            return LureliaCueType(rawValue: raw)
+        }
+        set {
+            cueTypeRaw = newValue?.rawValue
+            updatedAt = Date()
+        }
+    }
+
+    var habitRules: [String] {
+        get {
+            guard let s = habitRulesStorage,
+                  let data = s.data(using: .utf8),
+                  let decoded = try? JSONDecoder().decode([String].self, from: data) else { return [] }
+            return decoded
+        }
+        set {
+            guard let data = try? JSONEncoder().encode(newValue),
+                  let json = String(data: data, encoding: .utf8) else {
+                habitRulesStorage = nil
+                return
+            }
+            habitRulesStorage = newValue.isEmpty ? nil : json
+            updatedAt = Date()
+        }
+    }
+
+    var habitObstacles: [String] {
+        get {
+            guard let s = habitObstaclesStorage,
+                  let data = s.data(using: .utf8),
+                  let decoded = try? JSONDecoder().decode([String].self, from: data) else { return [] }
+            return decoded
+        }
+        set {
+            guard let data = try? JSONEncoder().encode(newValue),
+                  let json = String(data: data, encoding: .utf8) else {
+                habitObstaclesStorage = nil
+                return
+            }
+            habitObstaclesStorage = newValue.isEmpty ? nil : json
+            updatedAt = Date()
+        }
+    }
+
+    var habitSolutions: [String] {
+        get {
+            guard let s = habitSolutionsStorage,
+                  let data = s.data(using: .utf8),
+                  let decoded = try? JSONDecoder().decode([String].self, from: data) else { return [] }
+            return decoded
+        }
+        set {
+            guard let data = try? JSONEncoder().encode(newValue),
+                  let json = String(data: data, encoding: .utf8) else {
+                habitSolutionsStorage = nil
+                return
+            }
+            habitSolutionsStorage = newValue.isEmpty ? nil : json
+            updatedAt = Date()
+        }
+    }
+
+    var hasBlueprint: Bool {
+        identityStatement?.isEmpty == false ||
+        habitPurpose?.isEmpty == false ||
+        implementationIntention?.isEmpty == false ||
+        cueType != nil ||
+        cueDescription?.isEmpty == false ||
+        !habitRules.isEmpty ||
+        !habitObstacles.isEmpty ||
+        immediateReward?.isEmpty == false ||
+        longTermReward?.isEmpty == false ||
+        currentEnvironment?.isEmpty == false ||
+        idealEnvironment?.isEmpty == false ||
+        environmentChanges?.isEmpty == false
+        || friction?.isEmpty == false
+    }
+
+    // MARK: - Active weekdays
+
+    var activeWeekdays: [Int] {
+        get {
+            guard let data = activeWeekdaysStorage.data(using: .utf8),
+                  let decoded = try? JSONDecoder().decode([Int].self, from: data)
+            else {
+                return [1, 2, 3, 4, 5, 6, 7]
+            }
+
+            let sanitized = decoded
+                .filter { (1...7).contains($0) }
+                .sorted()
+
+            return sanitized.isEmpty
+                ? [1, 2, 3, 4, 5, 6, 7]
+                : sanitized
+        }
+        set {
+            let sanitized = Array(Set(newValue))
+                .filter { (1...7).contains($0) }
+                .sorted()
+
+            let final = sanitized.isEmpty
+                ? [1, 2, 3, 4, 5, 6, 7]
+                : sanitized
+
+            if let data = try? JSONEncoder().encode(final),
+               let json = String(data: data, encoding: .utf8) {
+                activeWeekdaysStorage = json
+            }
+
+            daysPerWeek = final.count
+            updatedAt = Date()
+        }
+    }
+
+    func isActiveOn(_ date: Date, calendar: Calendar = .current) -> Bool {
+        let weekday = calendar.component(.weekday, from: date)
+        return activeWeekdays.contains(weekday)
     }
 
     // MARK: - Stats reset filtering
@@ -168,6 +369,11 @@ extension LureliaHabit {
 
         var streak = 0
         while true {
+            if !isActiveOn(cursor, calendar: cal) {
+                guard let prev = cal.date(byAdding: .day, value: -1, to: cursor) else { break }
+                cursor = prev
+                continue
+            }
             if isCompletedDay(cursor) {
                 streak += 1
             } else if isSkippedDay(cursor) {
@@ -206,6 +412,13 @@ extension LureliaHabit {
     private func weekMet(weekStarting start: Date) -> Bool {
         guard let interval = Calendar.current.dateInterval(of: .weekOfYear, for: start) else { return false }
 
+        let activeDaysInWeek = activeWeekdays.filter { weekday in
+            guard let sample = Calendar.current.date(byAdding: .day, value: weekday - 1, to: interval.start) else {
+                return false
+            }
+            return interval.contains(sample)
+        }
+
         var completedDays = Set<Date>()
         for log in logs ?? [] {
             guard includeLog(log) else { continue }
@@ -220,6 +433,6 @@ extension LureliaHabit {
             if interval.contains(d) { skippedDays.insert(d) }
         }
 
-        return completedDays.union(skippedDays).count >= max(1, daysPerWeek)
+        return completedDays.union(skippedDays).count >= max(1, activeDaysInWeek.count)
     }
 }

@@ -51,7 +51,7 @@ final class LureliaNotificationManager: ObservableObject {
 
     func setup() {
         let center = UNUserNotificationCenter.current()
-
+        
         let doneAction = UNNotificationAction(
             identifier: Self.doneActionID,
             title: "Done ✓",
@@ -70,9 +70,9 @@ final class LureliaNotificationManager: ObservableObject {
         )
         center.setNotificationCategories([category])
         center.delegate = LureliaAppDelegate.shared
-
+        
         refreshAuthorizationStatus()
-
+        
         NotificationCenter.default.addObserver(
             forName: UIApplication.willEnterForegroundNotification,
             object: nil,
@@ -80,12 +80,21 @@ final class LureliaNotificationManager: ObservableObject {
         ) { [weak self] _ in
             Task { @MainActor [weak self] in
                 guard let self, let container = self.modelContainer else { return }
+                self.dumpAllNotificationCenterState(source: "willEnterForeground BEFORE rescheduleAll")
                 self.rescheduleAll(from: container)
+                self.dumpAllNotificationCenterState(source: "willEnterForeground AFTER rescheduleAll")
+                self.dumpLureliaPendingNotifications(source: "willEnterForeground")
             }
         }
-
+        
+        print("🧪 setup() reached reschedule block")
+        print("🧪 modelContainer is nil? \(modelContainer == nil)")
+        
         if let container = modelContainer {
+            print("🧪 setup() calling rescheduleAll(from:)")
             rescheduleAll(from: container)
+        } else {
+            print("🚨 setup() did NOT call rescheduleAll because modelContainer is nil")
         }
     }
 
@@ -118,6 +127,16 @@ final class LureliaNotificationManager: ObservableObject {
     // MARK: - Schedule
 
     func scheduleReminder(_ reminder: LureliaReminder) {
+        print("🚨 SCHEDULE REMINDER CALLED")
+        print("Object Identifier: \(ObjectIdentifier(reminder))")
+        print("   • Title: \(reminder.title)")
+        print("   • Reminder UUID: \(reminder.id)")
+        print("   • Notification ID BEFORE stable check: \(reminder.notificationID)")
+        print("   • isEnabled: \(reminder.isEnabled)")
+        print("   • isCompleted: \(reminder.isCompleted)")
+        print("   • scheduledDate: \(reminder.scheduledDate)")
+        print("   • nextFireAt: \(String(describing: reminder.nextFireAt))")
+        Thread.callStackSymbols.prefix(8).forEach { print($0) }
         cancelReminder(reminder)
 
         guard reminder.isEnabled && !reminder.isCompleted else { return }
@@ -134,17 +153,21 @@ final class LureliaNotificationManager: ObservableObject {
         let baseID = notificationBaseID(for: reminder)
         let times  = resolvedTimesOfDay(for: reminder)
 
-        print("🔔 [Lurelia] Scheduling reminder '\(reminder.title)'")
-        print("   • baseID: \(baseID)")
-        print("   • nextFireAt: \(String(describing: reminder.nextFireAt))")
-        print("   • timesOfDay: \(times)")
-        print("   • repeatUnit: \(reminder.repeatUnit.rawValue)")
+        print("━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
+        print("🔔 REMINDER SCHEDULE REQUEST")
+        print("   • Title: \(reminder.title)")
+        print("   • Reminder ID: \(reminder.id)")
+        print("   • Notification ID: \(reminder.notificationID)")
+        print("   • Base ID: \(baseID)")
+        print("   • Source: scheduleReminder(_:)")
 
         if reminder.repeatUnit == .none {
             scheduleOnce(reminder: reminder, content: content, baseID: baseID)
         } else {
             scheduleNextOccurrences(reminder: reminder, times: times, content: content, baseID: baseID)
         }
+
+        dumpLureliaPendingNotifications(source: "after scheduleReminder for \(reminder.title)")
     }
 
     // MARK: - Cancel
@@ -153,29 +176,136 @@ final class LureliaNotificationManager: ObservableObject {
         ensureStableNotificationID(for: reminder)
         let baseID = notificationBaseID(for: reminder)
         let center = UNUserNotificationCenter.current()
+        print("🚨 CANCEL REMINDER CALLED")
+        print("Object Identifier: \(ObjectIdentifier(reminder))")
+        print("   • Title: \(reminder.title)")
+        print("   • Reminder UUID: \(reminder.id)")
+        print("   • Notification ID: \(reminder.notificationID)")
+        print("   • Base ID: \(baseID)")
+        print("   • Stack:")
+        Thread.callStackSymbols.prefix(10).forEach { print("     \($0)") }
 
         var ids: [String] = [baseID]
         for i in 0..<20 { ids.append("\(baseID).\(i)") }
         center.removePendingNotificationRequests(withIdentifiers: ids)
+        center.removeDeliveredNotifications(withIdentifiers: ids)
+        print("🧹 Attempted removal IDs:")
+        ids.forEach { print("   • \($0)") }
 
         // Snooze IDs can't be predicted — async scan
         center.getPendingNotificationRequests { requests in
             let snoozeIDs = requests.map(\.identifier)
                 .filter { $0.hasPrefix(baseID + ".snooze.") }
+            print("🔎 Snooze scan for baseID: \(baseID)")
+            print("   • Found snooze IDs: \(snoozeIDs)")
             if !snoozeIDs.isEmpty {
                 center.removePendingNotificationRequests(withIdentifiers: snoozeIDs)
+                center.removeDeliveredNotifications(withIdentifiers: snoozeIDs)
             }
         }
 
         print("🧹 [Lurelia] Cancelled notifications for '\(reminder.title)'")
+        dumpLureliaPendingNotifications(source: "after cancelReminder for \(reminder.title)")
     }
 
     func cancelAllReminders() {
         UNUserNotificationCenter.current().getPendingNotificationRequests { requests in
             let ids = requests.map(\.identifier).filter { $0.hasPrefix("lurelia.reminder.") }
+            print("🚨 CANCEL ALL LURELIA REMINDERS")
+            print("   • Count: \(ids.count)")
+            ids.forEach { print("   • \($0)") }
             UNUserNotificationCenter.current().removePendingNotificationRequests(withIdentifiers: ids)
+            UNUserNotificationCenter.current().removeDeliveredNotifications(withIdentifiers: ids)
         }
     }
+    
+    func cancelRoutine(_ routine: LureliaRoutine) {
+        let center = UNUserNotificationCenter.current()
+
+        let routineModelID = String(describing: routine.persistentModelID)
+
+        var ids: [String] = []
+
+        ids.append(contentsOf: routine.startReminderNotificationIDs)
+        ids.append(contentsOf: routine.halfwayReminderNotificationIDs)
+        ids.append(contentsOf: routine.endReminderNotificationIDs)
+
+        ids.append("routine-\(routineModelID)-start")
+        ids.append("routine-\(routineModelID)-halfway")
+        ids.append("routine-\(routineModelID)-end")
+
+        ids.append("lurelia.routine.\(routineModelID)")
+        ids.append("lurelia.routine.\(routineModelID).start")
+        ids.append("lurelia.routine.\(routineModelID).halfway")
+        ids.append("lurelia.routine.\(routineModelID).end")
+
+        let uniqueIDs = Array(Set(ids))
+
+        print("🧹 CANCEL ROUTINE CALLED")
+        print("   • Routine: \(routine.name)")
+        print("   • Routine Model ID: \(routineModelID)")
+        print("   • IDs Count: \(uniqueIDs.count)")
+        uniqueIDs.forEach { print("   • \($0)") }
+
+        center.removePendingNotificationRequests(withIdentifiers: uniqueIDs)
+        center.removeDeliveredNotifications(withIdentifiers: uniqueIDs)
+
+        center.getPendingNotificationRequests { requests in
+            let routineIDs = requests
+                .filter { request in
+                    let identifier = request.identifier
+                    let title = request.content.title
+
+                    return identifier.localizedCaseInsensitiveContains(routineModelID)
+                        || identifier.localizedCaseInsensitiveContains(routine.name)
+                        || title.localizedCaseInsensitiveContains(routine.name)
+                        || identifier.localizedCaseInsensitiveContains("routine")
+                }
+                .map { $0.identifier }
+
+            if !routineIDs.isEmpty {
+                print("🧹 CANCEL ROUTINE ASYNC SCAN FOUND MORE IDS")
+                routineIDs.forEach { print("   • \($0)") }
+                center.removePendingNotificationRequests(withIdentifiers: routineIDs)
+                center.removeDeliveredNotifications(withIdentifiers: routineIDs)
+            }
+        }
+    }
+    
+    // MARK: - HARD RESET ALL NOTIFS FOR DEBUG
+    // func hardResetAllNotificationsForDebug() {
+        // let center = UNUserNotificationCenter.current()
+
+        // print("")
+        // print("🧨🧨🧨 HARD RESETTING ALL NOTIFICATIONS 🧨🧨🧨")
+        // print("This removes ALL pending and delivered notifications for this app.")
+
+        // center.getPendingNotificationRequests { requests in
+            // print("📌 Pending before hard reset: \(requests.count)")
+            // requests.forEach {
+                // print("   • \($0.identifier) | \($0.content.title)")
+            // }
+
+            // center.removeAllPendingNotificationRequests()
+
+            // center.getPendingNotificationRequests { afterRequests in
+                // print("📌 Pending after hard reset: \(afterRequests.count)")
+            // }
+        // }
+
+        // center.getDeliveredNotifications { notifications in
+            // print("📬 Delivered before hard reset: \(notifications.count)")
+            // notifications.forEach {
+                // print("   • \($0.request.identifier) | \($0.request.content.title) | \($0.date)")
+            // }
+
+            // center.removeAllDeliveredNotifications()
+
+            // center.getDeliveredNotifications { afterNotifications in
+                // print("📬 Delivered after hard reset: \(afterNotifications.count)")
+            // }
+        // }
+    // }
 
     // MARK: - Reschedule All
 
@@ -192,17 +322,74 @@ final class LureliaNotificationManager: ObservableObject {
             let descriptor = FetchDescriptor<LureliaReminder>()
             do {
                 let reminders = try context.fetch(descriptor)
-                    .filter { $0.isEnabled && !$0.isCompleted }
+                    .filter {
+                        $0.kind == .standalone &&
+                        $0.isEnabled &&
+                        !$0.isCompleted
+                    }
+                print("🔁 RESCHEDULE ALL — STANDALONE ONLY")
+                print("   • Count: \(reminders.count)")
+                for reminder in reminders {
+                    print("   • \(reminder.title) | kind=\(reminder.kind.rawValue) | notificationID=\(reminder.notificationID)")
+                }
+                print("")
+                print("══════════════════════════════════════")
+                print("📦 FETCHED REMINDERS FROM SWIFTDATA")
+                print("Count: \(reminders.count)")
+
+                for reminder in reminders {
+                    print("--------------------------------------")
+                    print("Title: \(reminder.title)")
+                    print("UUID: \(reminder.id)")
+                    print("Notification ID: \(reminder.notificationID)")
+                    print("Enabled: \(reminder.isEnabled)")
+                    print("Completed: \(reminder.isCompleted)")
+                    print("Scheduled: \(reminder.scheduledDate)")
+                }
+
+                print("══════════════════════════════════════")
+                print("")
+                print("🔁 RESCHEDULE FETCHED ACTIVE REMINDERS")
+                for reminder in reminders {
+                    print("   • \(reminder.title)")
+                    print("     UUID: \(reminder.id)")
+                    print("     notificationID: \(reminder.notificationID)")
+                    print("     enabled: \(reminder.isEnabled)")
+                    print("     completed: \(reminder.isCompleted)")
+                    print("     scheduledDate: \(reminder.scheduledDate)")
+                    print("     nextFireAt: \(String(describing: reminder.nextFireAt))")
+                }
 
                 let center  = UNUserNotificationCenter.current()
                 let pending = await center.pendingNotificationRequests()
                 let oldIDs  = pending.map(\.identifier).filter { $0.hasPrefix("lurelia.reminder.") }
                 if !oldIDs.isEmpty {
                     center.removePendingNotificationRequests(withIdentifiers: oldIDs)
+                    center.removeDeliveredNotifications(withIdentifiers: oldIDs)
                 }
 
-                print("🔁 [Lurelia] Rebuilding \(reminders.count) reminder notifications")
-                for reminder in reminders { scheduleReminder(reminder) }
+                let uniqueReminders = reminders.reduce(into: [String: LureliaReminder]()) { result, reminder in
+                    self.ensureStableNotificationID(for: reminder)
+                    let key = reminder.duplicatePreventionKey
+                    if result[key] == nil {
+                        result[key] = reminder
+                    } else {
+                        print("⚠️ [Lurelia] Skipping duplicate reminder during reschedule: \(reminder.title)")
+                        self.cancelReminder(reminder)
+                    }
+                }
+                .values
+                .sorted { $0.scheduledDate < $1.scheduledDate }
+                
+                print("━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
+                print("🔁 RESCHEDULE ALL")
+                print("   • Reminder Count: \(reminders.count)")
+                print("   • Unique Count: \(uniqueReminders.count)")
+                print("   • Pending Removed: \(oldIDs.count)")
+                print("   • Source: rescheduleAll(from:)")
+
+                print("🔁 [Lurelia] Rebuilding \(uniqueReminders.count) reminder notifications")
+                for reminder in uniqueReminders { scheduleReminder(reminder) }
             } catch {
                 print("❌ [Lurelia] rescheduleAll fetch error: \(error)")
             }
@@ -238,6 +425,12 @@ final class LureliaNotificationManager: ObservableObject {
         baseID: String
     ) {
         let fireDate = reminder.nextFireAt ?? reminder.scheduledDate
+        print("📅 One-Shot Reminder")
+        print("   • Title: \(reminder.title)")
+        print("   • Reminder ID: \(reminder.id)")
+        print("   • Notification ID: \(reminder.notificationID)")
+        print("   • Fire Date: \(fireDate)")
+        print("   • Source: scheduleOnce(_:)")
         let now      = Date()
         let delta    = fireDate.timeIntervalSince(now)
 
@@ -249,12 +442,26 @@ final class LureliaNotificationManager: ObservableObject {
         if delta <= 3 {
             let fireIn  = max(delta, 1)
             let trigger = UNTimeIntervalNotificationTrigger(timeInterval: fireIn, repeats: false)
-            addRequest(id: baseID, content: content, trigger: trigger)
+            addRequest(
+                id: baseID,
+                content: content,
+                trigger: trigger,
+                reminder: reminder,
+                fireDate: fireDate,
+                source: "scheduleOnce(_:timeInterval)"
+            )
         } else {
             var comps = Calendar.current.dateComponents([.year, .month, .day, .hour, .minute, .second], from: fireDate)
             comps.second = comps.second ?? 0
             let trigger = UNCalendarNotificationTrigger(dateMatching: comps, repeats: false)
-            addRequest(id: baseID, content: content, trigger: trigger)
+            addRequest(
+                id: baseID,
+                content: content,
+                trigger: trigger,
+                reminder: reminder,
+                fireDate: fireDate,
+                source: "scheduleOnce(_:calendar)"
+            )
         }
     }
 
@@ -268,6 +475,7 @@ final class LureliaNotificationManager: ObservableObject {
     ) {
         let now = Date()
         let cal = Calendar.current
+        let earliestAllowedFireDate = reminder.nextFireAt.map { max(now, $0) } ?? now
 
         // nextFireAt is the computed next fire for the primary time.
         // For each timesOfDay entry, compute the next occurrence >= now.
@@ -275,7 +483,7 @@ final class LureliaNotificationManager: ObservableObject {
             let (h, m) = parseTime(timeStr)
             guard let fireDate = nextOccurrence(
                 hour: h, minute: m,
-                after: now,
+                after: earliestAllowedFireDate.addingTimeInterval(-1),
                 reminder: reminder,
                 calendar: cal
             ) else {
@@ -283,11 +491,38 @@ final class LureliaNotificationManager: ObservableObject {
                 continue
             }
 
+            guard fireDate >= earliestAllowedFireDate else {
+                print("⏭ [Lurelia] Skipping occurrence before nextFireAt")
+                print("   • Title: \(reminder.title)")
+                print("   • Time Slot: \(timeStr)")
+                print("   • Fire Date: \(fireDate)")
+                print("   • Earliest Allowed: \(earliestAllowedFireDate)")
+                continue
+            }
+
+            let requestID = index == 0 ? baseID : "\(baseID).\(index)"
+
+            print("📅 Recurring Reminder Occurrence")
+            print("   • Title: \(reminder.title)")
+            print("   • Reminder ID: \(reminder.id)")
+            print("   • Notification ID: \(reminder.notificationID)")
+            print("   • Request ID: \(requestID)")
+            print("   • Time Slot: \(timeStr)")
+            print("   • Fire Date: \(fireDate)")
+            print("   • Source: scheduleNextOccurrences(_:)")
+
             var comps = cal.dateComponents([.year, .month, .day, .hour, .minute, .second], from: fireDate)
             comps.second = comps.second ?? 0
             let trigger  = UNCalendarNotificationTrigger(dateMatching: comps, repeats: false)
-            let id       = index == 0 ? baseID : "\(baseID).\(index)"
-            addRequest(id: id, content: content, trigger: trigger)
+            let id = requestID
+            addRequest(
+                id: id,
+                content: content,
+                trigger: trigger,
+                reminder: reminder,
+                fireDate: fireDate,
+                source: "scheduleNextOccurrences(_:) timeSlot=\(timeStr)"
+            )
 
             print("⏰ [Lurelia] Scheduled '\(reminder.title)' [\(timeStr)] → \(fireDate)")
         }
@@ -349,7 +584,17 @@ final class LureliaNotificationManager: ObservableObject {
     private func ensureStableNotificationID(for reminder: LureliaReminder) {
         let currentID = reminder.notificationID.trimmingCharacters(in: .whitespacesAndNewlines)
         if currentID.isEmpty {
-            reminder.notificationID = UUID().uuidString
+            let newID = UUID().uuidString
+            print("🆔 EMPTY notificationID FOUND — assigning new one")
+            print("   • Title: \(reminder.title)")
+            print("   • Reminder UUID: \(reminder.id)")
+            print("   • New Notification ID: \(newID)")
+            reminder.notificationID = newID
+        } else {
+            print("🆔 Stable notificationID OK")
+            print("   • Title: \(reminder.title)")
+            print("   • Reminder UUID: \(reminder.id)")
+            print("   • Notification ID: \(currentID)")
         }
     }
 
@@ -358,11 +603,50 @@ final class LureliaNotificationManager: ObservableObject {
         return "lurelia.reminder.\(id)"
     }
 
-    private func addRequest(id: String, content: UNMutableNotificationContent, trigger: UNNotificationTrigger) {
+    private func addRequest(
+        id: String,
+        content: UNMutableNotificationContent,
+        trigger: UNNotificationTrigger,
+        reminder: LureliaReminder,
+        fireDate: Date,
+        source: String
+    ) {
         let request = UNNotificationRequest(identifier: id, content: content, trigger: trigger)
+        print("📌 ADD REQUEST ABOUT TO RUN")
+        print("   • Title: \(reminder.title)")
+        print("   • Reminder UUID: \(reminder.id)")
+        print("   • Notification ID: \(reminder.notificationID)")
+        print("   • Request ID: \(id)")
+        print("   • Fire Date: \(fireDate)")
+        print("   • Source: \(source)")
+        print("")
+        print("➡️ ABOUT TO REGISTER NOTIFICATION")
+        print("Identifier: \(id)")
+        print("Reminder Title: \(reminder.title)")
+        print("Reminder UUID: \(reminder.id)")
+        print("Notification ID: \(reminder.notificationID)")
+        print("Fire Date: \(fireDate)")
+        print("")
         UNUserNotificationCenter.current().add(request) { error in
-            if let error { print("❌ [Lurelia] Failed to schedule '\(id)': \(error)") }
-            else { print("✅ [Lurelia] Scheduled: \(id)") }
+            if let error {
+                print("❌ [Lurelia] Failed to schedule notification")
+                print("   • Title: \(reminder.title)")
+                print("   • Reminder ID: \(reminder.id)")
+                print("   • Notification ID: \(reminder.notificationID)")
+                print("   • Request ID: \(id)")
+                print("   • Fire Date: \(fireDate)")
+                print("   • Source: \(source)")
+                print("   • Error: \(error)")
+            } else {
+                print("━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
+                print("✅ [Lurelia] Scheduled notification")
+                print("   • Title: \(reminder.title)")
+                print("   • Reminder ID: \(reminder.id)")
+                print("   • Notification ID: \(reminder.notificationID)")
+                print("   • Request ID: \(id)")
+                print("   • Fire Date: \(fireDate)")
+                print("   • Source: \(source)")
+            }
         }
     }
 
@@ -418,6 +702,127 @@ final class LureliaNotificationManager: ObservableObject {
             return (h, m)
         }
         return (9, 0)
+    }
+}
+
+// MARK: - Notification Audit Debugging
+
+extension LureliaNotificationManager {
+    
+    func dumpAllNotificationCenterState(source: String) {
+        let center = UNUserNotificationCenter.current()
+
+        print("")
+        print("👻👻👻👻👻👻👻👻👻👻👻👻👻👻👻")
+        print("👻 FULL NOTIFICATION CENTER AUDIT")
+        print("   • Source: \(source)")
+        print("👻👻👻👻👻👻👻👻👻👻👻👻👻👻👻")
+
+        center.getPendingNotificationRequests { requests in
+            print("")
+            print("📌 ALL PENDING NOTIFICATION REQUESTS")
+            print("   • Count: \(requests.count)")
+
+            for request in requests.sorted(by: { $0.identifier < $1.identifier }) {
+                let content = request.content
+
+                print("────────────────────────────")
+                print("📌 PENDING")
+                print("   • ID: \(request.identifier)")
+                print("   • Title: \(content.title)")
+                print("   • Body: \(content.body)")
+                print("   • Category: \(content.categoryIdentifier)")
+                print("   • Thread: \(content.threadIdentifier)")
+                print("   • UserInfo: \(content.userInfo)")
+                print("   • Trigger: \(self.fireDateDescription(for: request.trigger))")
+            }
+        }
+
+        center.getDeliveredNotifications { notifications in
+            print("")
+            print("📬 ALL DELIVERED NOTIFICATIONS")
+            print("   • Count: \(notifications.count)")
+
+            for notification in notifications.sorted(by: { $0.date < $1.date }) {
+                let request = notification.request
+                let content = request.content
+
+                print("────────────────────────────")
+                print("📬 DELIVERED")
+                print("   • Delivered Date: \(notification.date)")
+                print("   • ID: \(request.identifier)")
+                print("   • Title: \(content.title)")
+                print("   • Body: \(content.body)")
+                print("   • Category: \(content.categoryIdentifier)")
+                print("   • Thread: \(content.threadIdentifier)")
+                print("   • UserInfo: \(content.userInfo)")
+                print("   • Trigger: \(self.fireDateDescription(for: request.trigger))")
+            }
+        }
+    }
+
+    func dumpLureliaPendingNotifications(source: String) {
+        UNUserNotificationCenter.current().getPendingNotificationRequests { [weak self] requests in
+            guard let self = self else { return }
+            let lureliaRequests = requests
+                .filter { $0.identifier.hasPrefix("lurelia.reminder.") }
+                .sorted { $0.identifier < $1.identifier }
+
+            print("━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
+            print("🧾 LURELIA PENDING NOTIFICATION AUDIT")
+            print("   • Source: \(source)")
+            print("   • Total Pending Lurelia Requests: \(lureliaRequests.count)")
+
+            if lureliaRequests.isEmpty {
+                print("   • No pending Lurelia reminder notifications")
+                return
+            }
+
+            var grouped: [String: [UNNotificationRequest]] = [:]
+
+            for request in lureliaRequests {
+                let title = request.content.title
+                let body = request.content.body
+                let fireDescription = self.fireDateDescription(for: request.trigger)
+
+                print("────────────────────────────")
+                print("   • Request ID: \(request.identifier)")
+                print("   • Title: \(title)")
+                print("   • Body: \(body)")
+                print("   • Fire: \(fireDescription)")
+
+                let duplicateKey = "\(title)|\(fireDescription)"
+                grouped[duplicateKey, default: []].append(request)
+            }
+
+            let duplicates = grouped.filter { $0.value.count > 1 }
+
+            if duplicates.isEmpty {
+                print("✅ No duplicate title/fire-date pending requests found")
+            } else {
+                print("🚨 POSSIBLE DUPLICATE PENDING REQUESTS")
+                for (_, duplicateRequests) in duplicates {
+                    print("────────────────────────────")
+                    print("   • Duplicate Count: \(duplicateRequests.count)")
+                    for request in duplicateRequests {
+                        print("     - \(request.identifier) | \(request.content.title) | \(self.fireDateDescription(for: request.trigger))")
+                    }
+                }
+            }
+        }
+    }
+
+    private func fireDateDescription(for trigger: UNNotificationTrigger?) -> String {
+        if let calendarTrigger = trigger as? UNCalendarNotificationTrigger {
+            let c = calendarTrigger.dateComponents
+            return "calendar y=\(c.year ?? -1) m=\(c.month ?? -1) d=\(c.day ?? -1) h=\(c.hour ?? -1) min=\(c.minute ?? -1) s=\(c.second ?? -1) repeats=\(calendarTrigger.repeats)"
+        }
+
+        if let intervalTrigger = trigger as? UNTimeIntervalNotificationTrigger {
+            return "interval \(intervalTrigger.timeInterval)s repeats=\(intervalTrigger.repeats)"
+        }
+
+        return "unknown trigger"
     }
 }
 

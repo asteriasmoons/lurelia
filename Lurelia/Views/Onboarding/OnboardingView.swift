@@ -26,9 +26,9 @@ struct OnboardingView: View {
     
     private let categories: [(icon: String, title: String)] = [
         ("health", "Health"),
-        ("dumbbell", "Fitness"),
+        ("weight", "Fitness"),
         ("houseoutline", "Home"),
-        ("briefcase.fill", "Work"),
+        ("casemagic", "Work"),
         ("book.fill", "Study"),
         ("heartfill", "Care"),
         ("crystalball", "Spirituality"),
@@ -138,18 +138,11 @@ extension OnboardingView {
         VStack(spacing: 28) {
             Spacer()
             
-            ZStack {
-                Circle()
-                    .fill(LColors.glassSurface)
-                    .frame(width: 160, height: 160)
-                
-                Circle()
-                    .stroke(LColors.glassBorderStrong, lineWidth: 1)
-                    .frame(width: 160, height: 160)
-                
+            GlassCard {
                 Image(systemName: "sparkles")
                     .font(.system(size: 58))
                     .foregroundStyle(LGradients.header)
+                    .frame(width: 160, height: 160)
             }
             
             VStack(spacing: 14) {
@@ -235,7 +228,7 @@ extension OnboardingView {
                 selectedCategories.insert(category.title)
             }
         } label: {
-            VStack(spacing: 14) {
+            let content = VStack(spacing: 14) {
                 Group {
                     if UIImage(named: category.icon) != nil {
                         Image(category.icon)
@@ -261,26 +254,20 @@ extension OnboardingView {
             }
             .frame(maxWidth: .infinity)
             .frame(height: 130)
-            .background(
-                Group {
-                    if isSelected {
-                        RoundedRectangle(cornerRadius: 24, style: .continuous)
-                            .fill(LGradients.header)
-                    } else {
-                        RoundedRectangle(cornerRadius: 24, style: .continuous)
-                            .fill(LColors.glassSurface)
+            
+            Group {
+                if isSelected {
+                    content
+                        .background(
+                            RoundedRectangle(cornerRadius: 24, style: .continuous)
+                                .fill(LGradients.header)
+                        )
+                } else {
+                    GlassCard {
+                        content
                     }
                 }
-            )
-            .overlay(
-                RoundedRectangle(cornerRadius: 24, style: .continuous)
-                    .stroke(
-                        isSelected
-                        ? Color.clear
-                        : LColors.glassBorder,
-                        lineWidth: 1
-                    )
-            )
+            }
             .scaleEffect(isSelected ? 0.97 : 1)
             .animation(.spring(duration: 0.2), value: isSelected)
         }
@@ -349,7 +336,7 @@ extension OnboardingView {
                 selectedRoutines.insert(routine.id)
             }
         } label: {
-            HStack(spacing: 16) {
+            let content = HStack(spacing: 16) {
                 Group {
                     if UIImage(named: routine.icon) != nil {
                         Image(routine.icon)
@@ -392,26 +379,20 @@ extension OnboardingView {
             }
             .padding(.horizontal, 18)
             .frame(height: 72)
-            .background(
-                Group {
-                    if isSelected {
-                        RoundedRectangle(cornerRadius: 24)
-                            .fill(LGradients.header.opacity(0.9))
-                    } else {
-                        RoundedRectangle(cornerRadius: 24)
-                            .fill(LColors.glassSurface)
+            
+            Group {
+                if isSelected {
+                    content
+                        .background(
+                            RoundedRectangle(cornerRadius: 24)
+                                .fill(LGradients.header.opacity(0.9))
+                        )
+                } else {
+                    GlassCard {
+                        content
                     }
                 }
-            )
-            .overlay(
-                RoundedRectangle(cornerRadius: 24)
-                    .stroke(
-                        isSelected
-                        ? Color.clear
-                        : LColors.glassBorder,
-                        lineWidth: 1
-                    )
-            )
+            }
         }
         .buttonStyle(.plain)
     }
@@ -425,18 +406,11 @@ extension OnboardingView {
         VStack(spacing: 28) {
             Spacer()
             
-            ZStack {
-                Circle()
-                    .fill(LColors.glassSurface)
-                    .frame(width: 160, height: 160)
-                
-                Circle()
-                    .stroke(LColors.glassBorderStrong, lineWidth: 1)
-                    .frame(width: 160, height: 160)
-                
+            GlassCard {
                 Image(systemName: "bell.badge.fill")
                     .font(.system(size: 54))
                     .foregroundStyle(LGradients.header)
+                    .frame(width: 160, height: 160)
             }
             
             VStack(spacing: 14) {
@@ -495,18 +469,11 @@ extension OnboardingView {
         VStack(spacing: 28) {
             Spacer()
             
-            ZStack {
-                Circle()
-                    .fill(LColors.glassSurface)
-                    .frame(width: 180, height: 180)
-                
-                Circle()
-                    .stroke(LColors.glassBorderStrong, lineWidth: 1)
-                    .frame(width: 180, height: 180)
-                
+            GlassCard {
                 Image(systemName: "checkmark.circle.fill")
                     .font(.system(size: 72))
                     .foregroundStyle(LGradients.header)
+                    .frame(width: 180, height: 180)
             }
             
             VStack(spacing: 14) {
