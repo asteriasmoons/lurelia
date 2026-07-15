@@ -339,7 +339,7 @@ struct HabitBlueprintDetailView: View {
 
                     if habit.temptationNeed?.isEmpty == false ||
                        habit.temptationWant?.isEmpty == false {
-                        sectionCard(title: "Temptation Bundling", icon: "sparkbolt") {
+                        sectionCard(title: "Temptation Bundling", icon: "heartunlock") {
                             VStack(alignment: .leading, spacing: 12) {
                                 if let need = habit.temptationNeed, !need.isEmpty {
                                     sectionLabel("Need")
