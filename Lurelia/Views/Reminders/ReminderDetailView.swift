@@ -117,7 +117,7 @@ struct ReminderDetailView: View {
                     // MARK: - Motivation
 
                     if let motivation = reminder.motivation, !motivation.isEmpty {
-                        sectionCard(title: "Motivation", icon: "loveflame") {
+                        sectionCard(title: "Motivation", icon: "sparkle") {
                             sectionLabel("What makes this reminder worth doing?")
                             sectionBody(motivation)
                         }
@@ -126,7 +126,7 @@ struct ReminderDetailView: View {
                     // MARK: - Consequences
 
                     if let consequences = reminder.consequences, !consequences.isEmpty {
-                        sectionCard(title: "Consequences", icon: "sparkle") {
+                        sectionCard(title: "Consequences", icon: "minuswavy") {
                             sectionLabel("What happens if this gets skipped or ignored?")
                             sectionBody(consequences)
                         }
@@ -196,31 +196,11 @@ struct ReminderDetailView: View {
                     // MARK: - Recovery Plan
 
                     if let recoveryPlan = reminder.recoveryPlan, !recoveryPlan.isEmpty {
-                        sectionCard(title: "Recovery Plan", icon: "starladder") {
+                        sectionCard(title: "Recovery Plan", icon: "bandaidheart") {
                             sectionLabel("How do I recover if this does not go as planned?")
                             sectionBody(recoveryPlan)
                         }
                     }
-                    
-                    // MARK: - Temptation Bundling
-
-                    if reminder.temptationNeed?.isEmpty == false ||
-                       reminder.temptationWant?.isEmpty == false {
-                        sectionCard(title: "Temptation Bundling", icon: "sparkbolt") {
-                            VStack(alignment: .leading, spacing: 12) {
-                                if let need = reminder.temptationNeed, !need.isEmpty {
-                                    temptationLabel("Need")
-                                    temptationBody(need)
-                                }
-                                
-                                if let want = reminder.temptationWant, !want.isEmpty {
-                                    temptationLabel("Want")
-                                    temptationBody(want)
-                                }
-                            }
-                        }
-                    }
-                    
                     // MARK: - Friction
 
                     sectionCard(title: "Tiny Nudge", icon: "starchat") {
@@ -705,14 +685,14 @@ struct ReminderDetailView: View {
             .frame(maxWidth: .infinity, alignment: .leading)
     }
     
-    private func temptationLabel(_ text: String) -> some View {
+    private func nudgeLabel(_ text: String) -> some View {
         Text(text.uppercased())
             .font(.system(size: 10, weight: .semibold, design: .rounded))
             .foregroundStyle(.white.opacity(0.4))
             .tracking(0.6)
     }
 
-    private func temptationBody(_ text: String) -> some View {
+    private func nudgeBody(_ text: String) -> some View {
         Text(text)
             .font(.system(size: 14, weight: .semibold, design: .rounded))
             .foregroundStyle(.white.opacity(0.85))
@@ -831,15 +811,15 @@ struct ReminderDetailView: View {
 
             if let tinyNudgeResponse {
                 VStack(alignment: .leading, spacing: 12) {
-                    temptationLabel("Convince Me")
-                    temptationBody(tinyNudgeResponse.encouragement)
+                    nudgeLabel("Convince Me")
+                    nudgeBody(tinyNudgeResponse.encouragement)
 
                     Rectangle()
                         .fill(.white.opacity(0.07))
                         .frame(height: 1)
 
-                    temptationLabel("Reduce Friction")
-                    temptationBody(tinyNudgeResponse.frictionSuggestion)
+                    nudgeLabel("Reduce Friction")
+                    nudgeBody(tinyNudgeResponse.frictionSuggestion)
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .padding(14)

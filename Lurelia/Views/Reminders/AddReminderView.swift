@@ -46,8 +46,6 @@ struct AddReminderView: View {
     @State private var motivation = ""
     @State private var consequences = ""
     @State private var recoveryPlan = ""
-    @State private var temptationNeed = ""
-    @State private var temptationWant = ""
 
     // Location fields
     @State private var locationLabel = ""
@@ -237,25 +235,6 @@ struct AddReminderView: View {
                                 .font(.system(size: 15, design: .rounded))
                                 .foregroundStyle(LColors.textPrimary)
                         }
-                        
-                        field("Temptation Bundling") {
-                            VStack(alignment: .leading, spacing: 12) {
-                                TextField("Need: what do I need to do?", text: $temptationNeed, axis: .vertical)
-                                    .lineLimit(2, reservesSpace: true)
-                                    .font(.system(size: 15, design: .rounded))
-                                    .foregroundStyle(LColors.textPrimary)
-
-                                Rectangle()
-                                    .fill(.white.opacity(0.08))
-                                    .frame(height: 1)
-
-                                TextField("Want: what do I want to do?", text: $temptationWant, axis: .vertical)
-                                    .lineLimit(2, reservesSpace: true)
-                                    .font(.system(size: 15, design: .rounded))
-                                    .foregroundStyle(LColors.textPrimary)
-                            }
-                        }
-
                         // Location
 
                         locationField
@@ -1013,8 +992,6 @@ struct AddReminderView: View {
         motivation = reminder.motivation ?? ""
         consequences = reminder.consequences ?? ""
         recoveryPlan = reminder.recoveryPlan ?? ""
-        temptationNeed = reminder.temptationNeed ?? ""
-        temptationWant = reminder.temptationWant ?? ""
 
         // Location
         locationLabel = reminder.locationLabel ?? ""
@@ -1069,8 +1046,6 @@ struct AddReminderView: View {
         reminder.motivation = motivation.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? nil : motivation.trimmingCharacters(in: .whitespacesAndNewlines)
         reminder.consequences = consequences.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? nil : consequences.trimmingCharacters(in: .whitespacesAndNewlines)
         reminder.recoveryPlan = recoveryPlan.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? nil : recoveryPlan.trimmingCharacters(in: .whitespacesAndNewlines)
-        reminder.temptationNeed = temptationNeed.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? nil : temptationNeed.trimmingCharacters(in: .whitespacesAndNewlines)
-        reminder.temptationWant = temptationWant.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? nil : temptationWant.trimmingCharacters(in: .whitespacesAndNewlines)
 
         // Location
         reminder.locationLabel = locationLabel.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? nil : locationLabel.trimmingCharacters(in: .whitespacesAndNewlines)
