@@ -27,13 +27,8 @@ struct AddReminderView: View {
     @State private var checklistItems: [LureliaReminderChecklistItem] = [
         LureliaReminderChecklistItem(title: "", sortOrder: 0)
     ]
-    @State private var levels: [LureliaReminderLevel] = [
-        LureliaReminderLevel(title: "", sortOrder: 0)
-    ]
     @State private var emptyChecklistSubmitCount = 0
-    @State private var emptyLevelSubmitCount = 0
     @FocusState private var focusedChecklistItemID: UUID?
-    @FocusState private var focusedLevelID: UUID?
     
     
     @State private var reminderDate = Date()
@@ -48,9 +43,9 @@ struct AddReminderView: View {
     @State private var repeatEndsAt = Date()
 
     // Detail fields
-    @State private var purpose = ""
-    @State private var importance = ""
-    @State private var reminderOutcome = ""
+    @State private var motivation = ""
+    @State private var consequences = ""
+    @State private var recoveryPlan = ""
     @State private var temptationNeed = ""
     @State private var temptationWant = ""
 
@@ -151,8 +146,6 @@ struct AddReminderView: View {
                         }
 
                         checklistField
-                        
-                        levelsField
 
                         field("Icon") {
                             Button {
@@ -224,22 +217,22 @@ struct AddReminderView: View {
 
                         // Detail fields
 
-                        field("Purpose") {
-                            TextField("Why does this reminder exist?", text: $purpose, axis: .vertical)
+                        field("Motivation") {
+                            TextField("What makes this reminder worth doing?", text: $motivation, axis: .vertical)
                                 .lineLimit(3, reservesSpace: true)
                                 .font(.system(size: 15, design: .rounded))
                                 .foregroundStyle(LColors.textPrimary)
                         }
 
-                        field("Importance") {
-                            TextField("Why should I actually do this today?", text: $importance, axis: .vertical)
+                        field("Consequences") {
+                            TextField("What happens if this gets skipped or ignored?", text: $consequences, axis: .vertical)
                                 .lineLimit(3, reservesSpace: true)
                                 .font(.system(size: 15, design: .rounded))
                                 .foregroundStyle(LColors.textPrimary)
                         }
 
-                        field("Outcome") {
-                            TextField("What does completing this accomplish?", text: $reminderOutcome, axis: .vertical)
+                        field("Recovery Plan") {
+                            TextField("How do I recover if this does not go as planned?", text: $recoveryPlan, axis: .vertical)
                                 .lineLimit(3, reservesSpace: true)
                                 .font(.system(size: 15, design: .rounded))
                                 .foregroundStyle(LColors.textPrimary)
@@ -479,70 +472,6 @@ struct AddReminderView: View {
         }
     }
     
-    private var levelsField: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            HStack(spacing: 10) {
-                Text("Habit Levels")
-                    .font(.system(size: 13, weight: .bold, design: .rounded))
-                    .foregroundStyle(LColors.textSecondary)
-
-                Spacer()
-            }
-
-            VStack(alignment: .leading, spacing: 12) {
-                HStack(spacing: 10) {
-                    VStack(alignment: .leading, spacing: 3) {
-                        Text("\(nonEmptyLevels.count) levels")
-                            .font(.system(size: 13, weight: .black, design: .rounded))
-                            .foregroundStyle(LColors.textPrimary)
-
-                        Text("Build this reminder one level at a time.")
-                            .font(.system(size: 12, design: .rounded))
-                            .foregroundStyle(LColors.textSecondary.opacity(0.75))
-                    }
-
-                    Spacer()
-
-                    Button {
-                        addLevelAndFocus()
-                    } label: {
-                        Image("addwavy")
-                            .renderingMode(.template)
-                            .resizable()
-                            .scaledToFit()
-                            .foregroundStyle(LGradients.header)
-                            .frame(width: 24, height: 24)
-                    }
-                    .buttonStyle(.plain)
-                }
-
-                VStack(spacing: 10) {
-                    ForEach(levels) { level in
-                        levelRow(level)
-                    }
-                }
-            }
-            .padding(14)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .background(LColors.glassSurface, in: RoundedRectangle(cornerRadius: 18))
-            .overlay(
-                RoundedRectangle(cornerRadius: 18)
-                    .strokeBorder(
-                        LinearGradient(
-                            colors: [
-                                LColors.gradientBlue.opacity(0.85),
-                                LColors.gradientPurple.opacity(0.85),
-                                Color.white.opacity(0.35)
-                            ],
-                            startPoint: .topLeading,
-                            endPoint: .bottomTrailing
-                        ),
-                        lineWidth: 1.1
-                    )
-            )
-        }
-    }
-
     private func checklistRow(_ item: LureliaReminderChecklistItem) -> some View {
         HStack(spacing: 10) {
             Circle()
@@ -599,122 +528,6 @@ struct AddReminderView: View {
         )
     }
     
-    private func levelRow(_ level: LureliaReminderLevel) -> some View {
-        let iconNumber = min(level.sortOrder + 1, 9)
-
-        return HStack(spacing: 10) {
-            Image("\(iconNumber)wavy")
-                .renderingMode(.template)
-                .resizable()
-                .scaledToFit()
-                .frame(width: 20, height: 20)
-                .foregroundStyle(LGradients.header)
-
-            TextField("Level", text: levelTitleBinding(for: level.id))
-                .focused($focusedLevelID, equals: level.id)
-                .submitLabel(.return)
-                .onSubmit {
-                    handleLevelSubmit(for: level.id)
-                }
-                .font(.system(size: 14, weight: .semibold, design: .rounded))
-                .foregroundStyle(LColors.textPrimary)
-
-            if levels.count > 1 {
-                Button {
-                    removeLevel(level.id)
-                } label: {
-                    Image("xmarkwavy")
-                        .renderingMode(.template)
-                        .resizable()
-                        .scaledToFit()
-                        .foregroundStyle(LColors.textSecondary.opacity(0.75))
-                        .frame(width: 18, height: 18)
-                }
-                .buttonStyle(.plain)
-            }
-        }
-        .padding(.horizontal, 10)
-        .padding(.vertical, 10)
-        .background(
-            LColors.glassSurface2,
-            in: RoundedRectangle(cornerRadius: 14)
-        )
-        .overlay(
-            RoundedRectangle(cornerRadius: 14)
-                .strokeBorder(.white.opacity(0.08))
-        )
-    }
-    
-    private var nonEmptyLevels: [LureliaReminderLevel] {
-        levels.filter { !$0.title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
-    }
-
-    private func levelTitleBinding(for id: UUID) -> Binding<String> {
-        Binding(
-            get: {
-                levels.first(where: { $0.id == id })?.title ?? ""
-            },
-            set: { newValue in
-                guard let index = levels.firstIndex(where: { $0.id == id }) else { return }
-                levels[index].title = newValue
-                levels[index].updatedAt = Date()
-                emptyLevelSubmitCount = 0
-            }
-        )
-    }
-
-    private func addLevelAndFocus() {
-        guard levels.count < 9 else { return }
-
-        withAnimation(.spring(response: 0.28, dampingFraction: 0.86)) {
-            let newLevel = LureliaReminderLevel(
-                title: "",
-                sortOrder: levels.count
-            )
-
-            levels.append(newLevel)
-            focusedLevelID = newLevel.id
-            emptyLevelSubmitCount = 0
-        }
-    }
-
-    private func handleLevelSubmit(for id: UUID) {
-        let trimmed = levels.first(where: { $0.id == id })?.title.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-
-        if trimmed.isEmpty {
-            emptyLevelSubmitCount += 1
-
-            if emptyLevelSubmitCount >= 2 {
-                focusedLevelID = nil
-                emptyLevelSubmitCount = 0
-            }
-
-            return
-        }
-
-        emptyLevelSubmitCount = 0
-        addLevelAndFocus()
-    }
-
-    private func removeLevel(_ id: UUID) {
-        withAnimation(.spring(response: 0.28, dampingFraction: 0.86)) {
-            levels.removeAll { $0.id == id }
-
-            if levels.isEmpty {
-                levels = [LureliaReminderLevel(title: "", sortOrder: 0)]
-            }
-
-            normalizeLevelSortOrder()
-        }
-    }
-
-    private func normalizeLevelSortOrder() {
-        for index in levels.indices {
-            levels[index].sortOrder = index
-            levels[index].updatedAt = Date()
-        }
-    }
-
     private func addChecklistItemAndFocus() {
         withAnimation(.spring(response: 0.28, dampingFraction: 0.86)) {
             let newItem = LureliaReminderChecklistItem(
@@ -1187,11 +1000,6 @@ struct AddReminderView: View {
             ? [LureliaReminderChecklistItem(title: "", sortOrder: 0)]
             : existingChecklist
         
-        let existingLevels = reminder.levels.sorted { $0.sortOrder < $1.sortOrder }
-        levels = existingLevels.isEmpty
-            ? [LureliaReminderLevel(title: "", sortOrder: 0)]
-            : existingLevels
-
         repeatUnit = reminder.repeatUnit
         repeatInterval = reminder.repeatInterval
         repeatWeekdays = Set(reminder.repeatWeekdays)
@@ -1202,9 +1010,9 @@ struct AddReminderView: View {
         }
 
         // Detail fields
-        purpose = reminder.purpose ?? ""
-        importance = reminder.importance ?? ""
-        reminderOutcome = reminder.reminderOutcome ?? ""
+        motivation = reminder.motivation ?? ""
+        consequences = reminder.consequences ?? ""
+        recoveryPlan = reminder.recoveryPlan ?? ""
         temptationNeed = reminder.temptationNeed ?? ""
         temptationWant = reminder.temptationWant ?? ""
 
@@ -1255,9 +1063,12 @@ struct AddReminderView: View {
         reminder.additionalFireTimes = additionalFireTimes
 
         // Detail fields
-        reminder.purpose = purpose.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? nil : purpose.trimmingCharacters(in: .whitespacesAndNewlines)
-        reminder.importance = importance.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? nil : importance.trimmingCharacters(in: .whitespacesAndNewlines)
-        reminder.reminderOutcome = reminderOutcome.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? nil : reminderOutcome.trimmingCharacters(in: .whitespacesAndNewlines)
+        reminder.purpose = nil
+        reminder.importance = nil
+        reminder.reminderOutcome = nil
+        reminder.motivation = motivation.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? nil : motivation.trimmingCharacters(in: .whitespacesAndNewlines)
+        reminder.consequences = consequences.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? nil : consequences.trimmingCharacters(in: .whitespacesAndNewlines)
+        reminder.recoveryPlan = recoveryPlan.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? nil : recoveryPlan.trimmingCharacters(in: .whitespacesAndNewlines)
         reminder.temptationNeed = temptationNeed.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? nil : temptationNeed.trimmingCharacters(in: .whitespacesAndNewlines)
         reminder.temptationWant = temptationWant.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? nil : temptationWant.trimmingCharacters(in: .whitespacesAndNewlines)
 
@@ -1277,15 +1088,7 @@ struct AddReminderView: View {
                 updatedAt: Date()
             )
         }
-        reminder.levels = nonEmptyLevels.enumerated().map { index, level in
-            LureliaReminderLevel(
-                id: level.id,
-                title: level.title.trimmingCharacters(in: .whitespacesAndNewlines),
-                sortOrder: index,
-                createdAt: level.createdAt,
-                updatedAt: Date()
-            )
-        }
+        reminder.levels = []
         if scheduleDidChange {
             reminder.nextFireAt = nextUnfiredDateFromCurrentForm()
         }

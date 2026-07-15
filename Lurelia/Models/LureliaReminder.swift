@@ -344,6 +344,9 @@ final class LureliaReminder {
     var purpose: String?
     var importance: String?
     var reminderOutcome: String?
+    var motivation: String?
+    var consequences: String?
+    var recoveryPlan: String?
     var friction: String?
 
     // MARK: - Temptation Bundling

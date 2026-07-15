@@ -114,21 +114,21 @@ struct ReminderDetailView: View {
                     }
                     .padding(.horizontal, 24)
 
-                    // MARK: - Purpose
+                    // MARK: - Motivation
 
-                    if let purpose = reminder.purpose, !purpose.isEmpty {
-                        sectionCard(title: "Purpose", icon: "loveflame") {
-                            sectionLabel("Why does this reminder exist?")
-                            sectionBody(purpose)
+                    if let motivation = reminder.motivation, !motivation.isEmpty {
+                        sectionCard(title: "Motivation", icon: "loveflame") {
+                            sectionLabel("What makes this reminder worth doing?")
+                            sectionBody(motivation)
                         }
                     }
 
-                    // MARK: - Importance
+                    // MARK: - Consequences
 
-                    if let importance = reminder.importance, !importance.isEmpty {
-                        sectionCard(title: "Importance", icon: "sparkle") {
-                            sectionLabel("Why should I actually do this today?")
-                            sectionBody(importance)
+                    if let consequences = reminder.consequences, !consequences.isEmpty {
+                        sectionCard(title: "Consequences", icon: "sparkle") {
+                            sectionLabel("What happens if this gets skipped or ignored?")
+                            sectionBody(consequences)
                         }
                     }
 
@@ -193,12 +193,12 @@ struct ReminderDetailView: View {
                         .padding(.horizontal, 24)
                     }
 
-                    // MARK: - Reminder Outcome
+                    // MARK: - Recovery Plan
 
-                    if let outcome = reminder.reminderOutcome, !outcome.isEmpty {
-                        sectionCard(title: "Reminder Outcome", icon: "starladder") {
-                            sectionLabel("What does completing this accomplish?")
-                            sectionBody(outcome)
+                    if let recoveryPlan = reminder.recoveryPlan, !recoveryPlan.isEmpty {
+                        sectionCard(title: "Recovery Plan", icon: "starladder") {
+                            sectionLabel("How do I recover if this does not go as planned?")
+                            sectionBody(recoveryPlan)
                         }
                     }
                     
@@ -227,18 +227,6 @@ struct ReminderDetailView: View {
                         frictionBox
                     }
                     
-                    // MARK: - Habit Levels
-
-                    if reminder.hasLevels {
-                        sectionCard(title: "Habit Levels", icon: "starprogressbar") {
-                            VStack(alignment: .leading, spacing: 10) {
-                                ForEach(sortedLevels, id: \.id) { level in
-                                    levelRow(level)
-                                }
-                            }
-                        }
-                    }
-
                     // MARK: - Completion Steps (Checklist)
 
                     if reminder.hasChecklist {
