@@ -29,6 +29,10 @@ struct LureliaNewJourneySheet: View {
     private var isEditing: Bool {
         journey != nil
     }
+    
+    private var useFullScreenCover: Bool {
+        UIDevice.current.userInterfaceIdiom == .pad
+    }
 
     var body: some View {
         NavigationStack {
@@ -102,10 +106,19 @@ struct LureliaNewJourneySheet: View {
             .navigationTitle("")
             .navigationBarTitleDisplayMode(.inline)
             .toolbarBackground(.hidden, for: .navigationBar)
-            .sheet(isPresented: $showIconPicker) {
+            .sheet(isPresented: Binding(
+                get: { !useFullScreenCover && showIconPicker },
+                set: { showIconPicker = $0 }
+            )) {
                 IconPickerView(selectedIcon: $iconName)
                     .presentationDetents([.large])
                     .presentationDragIndicator(.hidden)
+            }
+            .fullScreenCover(isPresented: Binding(
+                get: { useFullScreenCover && showIconPicker },
+                set: { showIconPicker = $0 }
+            )) {
+                IconPickerView(selectedIcon: $iconName)
             }
             .onAppear {
                 loadExistingJourneyIfNeeded()

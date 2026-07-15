@@ -14,17 +14,12 @@ struct ContentView: View {
 
     var body: some View {
         ZStack {
-            if let userSettings = settings.first {
-                if userSettings.hasCompletedOnboarding {
-                    MainTabView()
-                } else {
-                    OnboardingView()
-                }
+            if let userSettings = settings.first,
+               userSettings.hasCompletedOnboarding,
+               !userSettings.shouldReplayOnboarding {
+                MainTabView()
             } else {
                 OnboardingView()
-                    .onAppear {
-                        createSettingsIfNeeded()
-                    }
             }
         }
     }

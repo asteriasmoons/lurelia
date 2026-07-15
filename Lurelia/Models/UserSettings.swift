@@ -12,6 +12,7 @@ final class UserSettings {
     // MARK: - Onboarding
     
     var hasCompletedOnboarding: Bool = false
+    var shouldReplayOnboarding: Bool = false
     
     // MARK: - Categories
     

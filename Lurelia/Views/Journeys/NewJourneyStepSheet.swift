@@ -14,9 +14,6 @@ struct LureliaNewJourneyStepSheet: View {
     @Query(sort: \LureliaReminder.scheduledDate)
     private var reminders: [LureliaReminder]
 
-    @Query(sort: \LureliaRoutine.sortOrder)
-    private var routines: [LureliaRoutine]
-
     @Query(sort: \LureliaHabit.title)
     private var habits: [LureliaHabit]
 
@@ -29,10 +26,8 @@ struct LureliaNewJourneyStepSheet: View {
     @State private var hasTargetDate = false
     @State private var targetDate = Date()
     @State private var linkedReminderIDs: Set<UUID> = []
-    @State private var linkedRoutineIDs: Set<UUID> = []
     @State private var linkedHabitIDs: Set<UUID> = []
     @State private var showLinkedReminders = false
-    @State private var showLinkedRoutines = false
     @State private var showLinkedHabits = false
 
     private var isEditing: Bool { step != nil }
@@ -121,9 +116,6 @@ struct LureliaNewJourneyStepSheet: View {
 
                             // Linked reminders
                             linkedRemindersCard
-
-                            // Linked routines
-                            linkedRoutinesCard
 
                             // Linked habits
                             linkedHabitsCard
@@ -334,71 +326,6 @@ struct LureliaNewJourneyStepSheet: View {
         return details.isEmpty ? "Habit" : details
     }
 
-    // MARK: - Linked Routines
-
-    private var linkedRoutinesCard: some View {
-        GlassCard {
-            VStack(alignment: .leading, spacing: 12) {
-                Button {
-                    withAnimation(.spring(response: 0.28, dampingFraction: 0.86)) {
-                        showLinkedRoutines.toggle()
-                    }
-                } label: {
-                    HStack(spacing: 10) {
-                        VStack(alignment: .leading, spacing: 4) {
-                            Text("LINKED ROUTINES")
-                                .font(.system(size: 11, weight: .bold, design: .rounded))
-                                .foregroundStyle(.white.opacity(0.5))
-
-                            Text("\(linkedRoutineIDs.count) selected")
-                                .font(.system(size: 12, weight: .bold, design: .rounded))
-                                .foregroundStyle(LGradients.header)
-                        }
-
-                        Spacer()
-
-                        Image("chevdown")
-                            .renderingMode(.template)
-                            .resizable()
-                            .scaledToFit()
-                            .foregroundStyle(LGradients.header)
-                            .frame(width: 18, height: 18)
-                            .rotationEffect(.degrees(showLinkedRoutines ? 180 : 0))
-                    }
-                    .contentShape(Rectangle())
-                }
-                .buttonStyle(.plain)
-
-                if showLinkedRoutines {
-                    if routines.isEmpty {
-                        Text("No routines available.")
-                            .font(.system(size: 13, weight: .medium, design: .rounded))
-                            .foregroundStyle(.white.opacity(0.6))
-                    } else {
-                        VStack(spacing: 8) {
-                            ForEach(routines) { routine in
-                                linkRow(
-                                    icon: routine.icon,
-                                    title: routine.name,
-                                    subtitle: routine.timeOfDay.rawValue,
-                                    isSelected: linkedRoutineIDs.contains(UUID(uuidString: routine.persistentID) ?? UUID())
-                                ) {
-                                    // Routines use persistentID (String) so we store as UUID via persistentID
-                                    guard let rid = UUID(uuidString: routine.persistentID) else { return }
-                                    if linkedRoutineIDs.contains(rid) {
-                                        linkedRoutineIDs.remove(rid)
-                                    } else {
-                                        linkedRoutineIDs.insert(rid)
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-        }
-    }
-
     // MARK: - Generic Link Row
 
     @ViewBuilder
@@ -456,7 +383,6 @@ struct LureliaNewJourneyStepSheet: View {
             targetDate = td
         }
         linkedReminderIDs = Set(step.linkedReminderIDs)
-        linkedRoutineIDs = Set(step.linkedRoutineIDs)
         linkedHabitIDs = Set(step.linkedHabitIDs)
     }
 
@@ -476,7 +402,6 @@ struct LureliaNewJourneyStepSheet: View {
             step.targetDate = hasTargetDate ? targetDate : nil
             step.updatedAt = Date()
             step.linkedReminderIDs = Array(linkedReminderIDs)
-            step.linkedRoutineIDs = Array(linkedRoutineIDs)
             step.linkedHabitIDs = Array(linkedHabitIDs)
             dismiss()
             return
@@ -491,7 +416,6 @@ struct LureliaNewJourneyStepSheet: View {
         newStep.status = status
         newStep.targetDate = hasTargetDate ? targetDate : nil
         newStep.linkedReminderIDs = Array(linkedReminderIDs)
-        newStep.linkedRoutineIDs = Array(linkedRoutineIDs)
         newStep.linkedHabitIDs = Array(linkedHabitIDs)
         modelContext.insert(newStep)
         dismiss()

@@ -40,6 +40,10 @@ struct RemindersView: View {
     @State private var editingReminder: LureliaReminder?
     @State private var showCompletionBanner = false
     
+    private var useFullScreenCover: Bool {
+        UIDevice.current.userInterfaceIdiom == .pad
+    }
+    
     private var hideCompletedReminders: Bool {
         userSettings.first?.hideCompletedReminders ?? false
     }
@@ -185,10 +189,28 @@ struct RemindersView: View {
             }
             .navigationBarTitleDisplayMode(.inline)
             .toolbarBackground(.hidden, for: .navigationBar)
-            .sheet(isPresented: $showAddReminder) {
+            .sheet(isPresented: Binding(
+                get: { !useFullScreenCover && showAddReminder },
+                set: { showAddReminder = $0 }
+            )) {
                 AddReminderView()
             }
-            .sheet(item: $editingReminder) { reminder in
+            .fullScreenCover(isPresented: Binding(
+                get: { useFullScreenCover && showAddReminder },
+                set: { showAddReminder = $0 }
+            )) {
+                AddReminderView()
+            }
+            .sheet(item: Binding(
+                get: { useFullScreenCover ? nil : editingReminder },
+                set: { editingReminder = $0 }
+            )) { reminder in
+                AddReminderView(editingReminder: reminder)
+            }
+            .fullScreenCover(item: Binding(
+                get: { useFullScreenCover ? editingReminder : nil },
+                set: { editingReminder = $0 }
+            )) { reminder in
                 AddReminderView(editingReminder: reminder)
             }
             .fullScreenCover(isPresented: $showReminderHistory) {

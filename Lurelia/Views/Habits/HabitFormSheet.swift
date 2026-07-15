@@ -66,6 +66,10 @@ struct LureliaHabitFormSheet: View {
     private var canSave: Bool {
         !title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
     }
+    
+    private var useFullScreenCover: Bool {
+        UIDevice.current.userInterfaceIdiom == .pad
+    }
 
     // MARK: - Body
 
@@ -193,10 +197,19 @@ struct LureliaHabitFormSheet: View {
         }
         .onAppear { if isEditing { loadFromModel() } }
         .simultaneousGesture(TapGesture().onEnded { dismissKeyboard() })
-        .sheet(isPresented: $showIconPicker) {
+        .sheet(isPresented: Binding(
+            get: { !useFullScreenCover && showIconPicker },
+            set: { showIconPicker = $0 }
+        )) {
             IconPickerView(selectedIcon: $iconName)
                 .presentationDetents([.large])
                 .presentationDragIndicator(.hidden)
+        }
+        .fullScreenCover(isPresented: Binding(
+            get: { useFullScreenCover && showIconPicker },
+            set: { showIconPicker = $0 }
+        )) {
+            IconPickerView(selectedIcon: $iconName)
         }
     }
 

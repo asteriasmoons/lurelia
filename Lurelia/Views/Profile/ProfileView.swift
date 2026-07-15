@@ -241,11 +241,11 @@ struct ProfileView: View {
                 }
 
                 VStack(spacing: 5) {
-                    Text("Reset Onboarding?")
+                    Text("Replay Onboarding?")
                         .font(.system(size: 22, weight: .black, design: .rounded))
                         .foregroundStyle(.white)
 
-                    Text("This will mark onboarding as incomplete so you can go through it again. Your profile photo and other saved profile details will stay intact.")
+                    Text("This will simply replay the onboarding experience so you can preview it again. None of your reminders, habits, settings, profile information, or other data will be changed.")
                         .font(.system(size: 13, design: .rounded))
                         .foregroundStyle(.white.opacity(0.58))
                         .multilineTextAlignment(.center)
@@ -254,7 +254,9 @@ struct ProfileView: View {
 
                 VStack(spacing: 10) {
                     Button {
-                        resetOnboardingState()
+                        userSettings?.shouldReplayOnboarding = true
+
+                        try? modelContext.save()
 
                         withAnimation(.spring(duration: 0.22)) {
                             showOnboardingResetConfirmation = false
@@ -264,7 +266,7 @@ struct ProfileView: View {
                             Image(systemName: "arrow.counterclockwise")
                                 .font(.system(size: 14, weight: .bold))
 
-                            Text("Reset Onboarding")
+                            Text("Replay Onboarding")
                                 .font(.system(size: 15, weight: .bold, design: .rounded))
                         }
                         .foregroundStyle(.white)
@@ -336,23 +338,6 @@ struct ProfileView: View {
         
         userSettings.profileImageData = data
         
-        try? modelContext.save()
-    }
-
-    private func resetOnboardingState() {
-        let userSettings: UserSettings
-
-        if let existing = settings.first {
-            userSettings = existing
-        } else {
-            userSettings = UserSettings()
-            modelContext.insert(userSettings)
-        }
-
-        userSettings.hasCompletedOnboarding = false
-        userSettings.selectedCategories = []
-        userSettings.selectedStarterRoutines = []
-
         try? modelContext.save()
     }
 
@@ -433,8 +418,9 @@ struct ProfileView: View {
                     }
                 }
                 .frame(width: 92, height: 92)
-               } // may need to delete
+               }
             }
+            .frame(maxWidth: .infinity)
         }
     }
 

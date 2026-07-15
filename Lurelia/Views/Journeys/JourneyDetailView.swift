@@ -24,6 +24,10 @@ struct JourneyDetailView: View {
     @State private var showQuickAddStep = false
     @State private var showCheckInHistory = false
     @State private var noteToEdit: LureliaJourneyNote? = nil
+    
+    private var useFullScreenCover: Bool {
+        UIDevice.current.userInterfaceIdiom == .pad
+    }
 
     var body: some View {
         ZStack(alignment: .top) {
@@ -67,7 +71,16 @@ struct JourneyDetailView: View {
                 LureliaNewJourneyStepSheet(milestone: milestone)
             }
         }
-        .sheet(isPresented: $showCheckInHistory) {
+        .sheet(isPresented: Binding(
+            get: { !useFullScreenCover && showCheckInHistory },
+            set: { showCheckInHistory = $0 }
+        )) {
+            JourneyCheckInHistorySheet(journey: journey)
+        }
+        .fullScreenCover(isPresented: Binding(
+            get: { useFullScreenCover && showCheckInHistory },
+            set: { showCheckInHistory = $0 }
+        )) {
             JourneyCheckInHistorySheet(journey: journey)
         }
         .confirmationDialog("Journey Status", isPresented: $showStatusMenu, titleVisibility: .visible) {

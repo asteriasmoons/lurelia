@@ -81,6 +81,10 @@ struct KanbanTimelineView: View {
         selectedDayStandaloneReminders
             .filter { !pinnedReminderIDs.contains($0.id.uuidString) }
     }
+    
+    private var useFullScreenCover: Bool {
+        UIDevice.current.userInterfaceIdiom == .pad
+    }
 
     var body: some View {
         NavigationStack {
@@ -131,7 +135,8 @@ struct KanbanTimelineView: View {
                         .padding(.bottom, 12)
 
                     if let board = selectedBoard {
-                        ScrollView(.vertical, showsIndicators: false) {
+                        GeometryReader { proxy in
+                            ScrollView(.vertical, showsIndicators: false) {
                             VStack(alignment: .leading, spacing: 16) {
 
                                 selectedDayHeader
@@ -150,16 +155,20 @@ struct KanbanTimelineView: View {
                                         timelineMarker(title: "Inbox")
 
                                         if !inboxReminders.isEmpty {
-                                            KanbanTimelineInboxColumnView(
-                                                board: board,
-                                                reminders: inboxReminders,
-                                                selectedDay: selectedDay,
-                                                boardAccent: selectedBoardAccent,
-                                                onMoveReminder: { reminder, column in
-                                                    pinCard(type: .reminder, itemID: reminder.id.uuidString, in: column)
-                                                }
-                                            )
-                                            .padding(.leading, 48)
+                                            HStack(spacing: 0) {
+                                                Color.clear
+                                                    .frame(width: 48)
+
+                                                KanbanTimelineInboxColumnView(
+                                                    board: board,
+                                                    reminders: inboxReminders,
+                                                    selectedDay: selectedDay,
+                                                    boardAccent: selectedBoardAccent,
+                                                    onMoveReminder: { reminder, column in
+                                                        pinCard(type: .reminder, itemID: reminder.id.uuidString, in: column)
+                                                    }
+                                                )
+                                            }
                                         }
 
                                         if board.sortedColumns.isEmpty {
@@ -175,22 +184,26 @@ struct KanbanTimelineView: View {
                                             ForEach(timelineColumnOccurrences) { occurrence in
                                                 timelineMarker(title: occurrence.fireDate.formatted(date: .omitted, time: .shortened))
 
-                                                KanbanTimelineColumnView(
-                                                    column: occurrence.column,
-                                                    selectedDay: selectedDay,
-                                                    forcedFireDate: occurrence.fireDate,
-                                                    allReminders: selectedDayStandaloneReminders,
-                                                    onAddCard: {
-                                                        createRequest = KanbanCreateRequest(type: .reminder, column: occurrence.column)
-                                                    },
-                                                    onEditColumn: {
-                                                        editingColumn = occurrence.column
-                                                    },
-                                                    onComplete: {
-                                                        triggerBanner()
-                                                    }
-                                                )
-                                                .padding(.leading, 48)
+                                                HStack(spacing: 0) {
+                                                    Color.clear
+                                                        .frame(width: 48)
+
+                                                    KanbanTimelineColumnView(
+                                                        column: occurrence.column,
+                                                        selectedDay: selectedDay,
+                                                        forcedFireDate: occurrence.fireDate,
+                                                        allReminders: selectedDayStandaloneReminders,
+                                                        onAddCard: {
+                                                            createRequest = KanbanCreateRequest(type: .reminder, column: occurrence.column)
+                                                        },
+                                                        onEditColumn: {
+                                                            editingColumn = occurrence.column
+                                                        },
+                                                        onComplete: {
+                                                            triggerBanner()
+                                                        }
+                                                    )
+                                                }
                                             }
                                         }
 
@@ -225,11 +238,15 @@ struct KanbanTimelineView: View {
                                     }
                                 }
                             }
+                            .frame(width: proxy.size.width - 40, alignment: .leading)
                             .padding(.horizontal, 20)
                             .padding(.top, 4)
                             .padding(.bottom, 140)
                         }
-                    } else {
+                        .scrollClipDisabled(false)
+                        .clipped()
+                    }
+                } else {
                         noBoardsState
                             .padding(.horizontal, 24)
                             .padding(.top, 30)
@@ -258,17 +275,51 @@ struct KanbanTimelineView: View {
             .sheet(isPresented: $showCreateBoard) {
                 KanbanTimelineCreateBoardSheet()
             }
-            .sheet(isPresented: $showAddColumn) {
+            .sheet(isPresented: Binding(
+                get: { !useFullScreenCover && showAddColumn },
+                set: { showAddColumn = $0 }
+            )) {
                 if let selectedBoard {
                     KanbanTimelineColumnSheet(board: selectedBoard)
                 }
             }
-            .sheet(item: $editingColumn) { column in
+            .fullScreenCover(isPresented: Binding(
+                get: { useFullScreenCover && showAddColumn },
+                set: { showAddColumn = $0 }
+            )) {
+                if let selectedBoard {
+                    KanbanTimelineColumnSheet(board: selectedBoard)
+                }
+            }
+            .sheet(item: Binding(
+                get: { useFullScreenCover ? nil : editingColumn },
+                set: { editingColumn = $0 }
+            )) { column in
                 if let selectedBoard {
                     KanbanTimelineColumnSheet(board: selectedBoard, column: column)
                 }
             }
-            .sheet(item: $createRequest) { request in
+            .fullScreenCover(item: Binding(
+                get: { useFullScreenCover ? editingColumn : nil },
+                set: { editingColumn = $0 }
+            )) { column in
+                if let selectedBoard {
+                    KanbanTimelineColumnSheet(board: selectedBoard, column: column)
+                }
+            }
+            .sheet(item: Binding(
+                get: { useFullScreenCover ? nil : createRequest },
+                set: { createRequest = $0 }
+            )) { request in
+                AddReminderView(onCreated: { reminder in
+                    reminder.kind = .standalone
+                    pinCard(type: .reminder, itemID: reminder.id.uuidString, in: request.column)
+                })
+            }
+            .fullScreenCover(item: Binding(
+                get: { useFullScreenCover ? createRequest : nil },
+                set: { createRequest = $0 }
+            )) { request in
                 AddReminderView(onCreated: { reminder in
                     reminder.kind = .standalone
                     pinCard(type: .reminder, itemID: reminder.id.uuidString, in: request.column)
@@ -886,6 +937,7 @@ struct KanbanTimelineColumnOccurrence: Identifiable {
 struct KanbanTimelineColumnView: View {
     @Environment(\.modelContext) private var modelContext
     @Bindable var column: KanbanColumn
+    @State private var editingReminder: LureliaReminder?
 
     let selectedDay: Date
     var forcedFireDate: Date? = nil
@@ -1028,6 +1080,9 @@ struct KanbanTimelineColumnView: View {
                         selectedDay: selectedDay,
                         accent: accentColor,
                         onDelete: { deleteCard(occurrence.card) },
+                        onEdit: {
+                            editingReminder = occurrence.reminder
+                        },
                         onComplete: onComplete
                     )
                     .contextMenu {
@@ -1089,6 +1144,26 @@ struct KanbanTimelineColumnView: View {
                 }
         }
         .contentShape(RoundedRectangle(cornerRadius: 22, style: .continuous))
+        .sheet(item: Binding(
+            get: {
+                UIDevice.current.userInterfaceIdiom == .pad ? nil : editingReminder
+            },
+            set: {
+                editingReminder = $0
+            }
+        )) { reminder in
+            AddReminderView(editingReminder: reminder)
+        }
+        .fullScreenCover(item: Binding(
+            get: {
+                UIDevice.current.userInterfaceIdiom == .pad ? editingReminder : nil
+            },
+            set: {
+                editingReminder = $0
+            }
+        )) { reminder in
+            AddReminderView(editingReminder: reminder)
+        }
         .contextMenu {
             Button {
                 onEditColumn()
@@ -1180,6 +1255,7 @@ struct KanbanTimelineItemCard: View {
                     selectedDay: selectedDay,
                     accent: accent,
                     onDelete: onDelete,
+                    onEdit: { },
                     onComplete: onComplete
                 )
             }
@@ -1223,6 +1299,7 @@ struct KanbanTimelineOccurrenceCard: View {
     let selectedDay: Date
     let accent: Color
     let onDelete: () -> Void
+    let onEdit: () -> Void
     var onComplete: (() -> Void)? = nil
 
     var body: some View {
@@ -1233,6 +1310,7 @@ struct KanbanTimelineOccurrenceCard: View {
                 forcedFireDate: occurrence.fireDate,
                 accent: accent,
                 onDelete: onDelete,
+                onEdit: onEdit,
                 onComplete: onComplete
             )
         }
@@ -1338,6 +1416,7 @@ struct KanbanTimelineReminderCard: View {
     var forcedFireDate: Date? = nil
     let accent: Color
     let onDelete: () -> Void
+    let onEdit: () -> Void
     var onComplete: (() -> Void)? = nil
 
     private var calendar: Calendar { .current }
@@ -1382,41 +1461,62 @@ struct KanbanTimelineReminderCard: View {
             calendar.isDate($0, inSameDayAs: selectedDay)
         }
     }
+    
+    private var statusFireDate: Date? {
+        forcedFireDate ?? fireDates.first
+    }
+
+    private var isDoneForThisOccurrence: Bool {
+        guard let forcedFireDate else {
+            return isDoneOnSelectedDay
+        }
+
+        let completions = ([reminder.completedAt].compactMap { $0 } + reminder.completionTimestamps)
+            .filter { calendar.isDate($0, inSameDayAs: selectedDay) }
+
+        guard !completions.isEmpty else {
+            return false
+        }
+
+        let sortedFireDates = fireDates.sorted()
+
+        guard let index = sortedFireDates.firstIndex(of: forcedFireDate) else {
+            return false
+        }
+
+        let nextFireDate: Date? = {
+            let nextIndex = index + 1
+            guard sortedFireDates.indices.contains(nextIndex) else { return nil }
+            return sortedFireDates[nextIndex]
+        }()
+
+        return completions.contains { completedAt in
+            completedAt >= forcedFireDate &&
+            (nextFireDate == nil || completedAt < nextFireDate!)
+        }
+    }
 
     private func isOverdue(now: Date) -> Bool {
         guard calendar.isDateInToday(selectedDay) else { return false }
-        guard !isDoneOnSelectedDay && reminder.isEnabled else { return false }
+        guard !isDoneForThisOccurrence && reminder.isEnabled else { return false }
+        guard let fireDate = statusFireDate else { return false }
 
-        let startOfToday = calendar.startOfDay(for: now)
-        let nextFire = reminder.nextFireAt ?? reminder.scheduledDate
-
-        return nextFire < startOfToday
+        return fireDate < calendar.startOfDay(for: now)
     }
 
     private func isDueNow(now: Date) -> Bool {
         guard calendar.isDateInToday(selectedDay) else { return false }
-        guard !isDoneOnSelectedDay && reminder.isEnabled else { return false }
+        guard !isDoneForThisOccurrence && reminder.isEnabled else { return false }
+        guard let fireDate = statusFireDate else { return false }
 
-        let nextFire = reminder.nextFireAt ?? reminder.scheduledDate
-
-        if reminder.repeatUnit != .none {
-            let startOfToday = calendar.startOfDay(for: now)
-            if nextFire < startOfToday { return false }
-        }
-
-        return nextFire <= now
+        return fireDate <= now
     }
 
     private func isUpcoming(now: Date) -> Bool {
-        guard !isDoneOnSelectedDay && reminder.isEnabled else { return false }
+        guard !isDoneForThisOccurrence && reminder.isEnabled else { return false }
+        guard let fireDate = statusFireDate else { return false }
 
-        if calendar.isDateInToday(selectedDay) {
-            let nextFire = reminder.nextFireAt ?? reminder.scheduledDate
-            return nextFire > now && nextFire <= now.addingTimeInterval(24 * 60 * 60)
-        }
-
-        guard let firstFire = fireDates.first else { return false }
-        return firstFire > now
+        return fireDate > now
     }
 
     var body: some View {
@@ -1455,7 +1555,10 @@ struct KanbanTimelineReminderCard: View {
 
                 Spacer(minLength: 8)
 
-                completionCircle
+                HStack(spacing: 6) {
+                    completionCircle
+                    skipButton
+                }
             }
 
             HStack(alignment: .center, spacing: 8) {
@@ -1470,7 +1573,10 @@ struct KanbanTimelineReminderCard: View {
 
                 Spacer(minLength: 0)
 
-                deleteButton
+                HStack(spacing: 8) {
+                    editButton
+                    deleteButton
+                }
             }
         }
         .padding(12)
@@ -1508,6 +1614,42 @@ struct KanbanTimelineReminderCard: View {
                 }
             }
             .contentShape(Circle())
+        }
+        .buttonStyle(.plain)
+    }
+
+    private var skipButton: some View {
+        Button {
+            skipReminderOccurrence()
+        } label: {
+            Image("skipwavy")
+                .renderingMode(.template)
+                .resizable()
+                .scaledToFit()
+                .foregroundStyle(accent)
+                .frame(width: 30, height: 30)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .disabled(!reminder.isEnabled || (reminder.repeatUnit == .none && reminder.isCompleted))
+        .opacity((!reminder.isEnabled || (reminder.repeatUnit == .none && reminder.isCompleted)) ? 0.4 : 1)
+    }
+    
+    private var editButton: some View {
+        Button(action: onEdit) {
+            Image("pencil")
+                .renderingMode(.template)
+                .resizable()
+                .scaledToFit()
+                .frame(width: 13, height: 13)
+                .foregroundStyle(Color(lureliaHex: "#0db7d9"))
+                .frame(width: 30, height: 30)
+                .background(LColors.glassSurface, in: Circle())
+                .overlay(
+                    Circle()
+                        .strokeBorder(LColors.glassBorder.opacity(0.75), lineWidth: 1)
+                )
+                .contentShape(Circle())
         }
         .buttonStyle(.plain)
     }
@@ -1612,6 +1754,15 @@ struct KanbanTimelineReminderCard: View {
             await MainActor.run {
                 onComplete?()
             }
+        }
+    }
+
+    private func skipReminderOccurrence() {
+        Task {
+            await ReminderActionManager.skipReminderOccurrence(
+                reminder,
+                in: modelContext
+            )
         }
     }
 }
