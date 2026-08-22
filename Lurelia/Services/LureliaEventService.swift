@@ -168,6 +168,9 @@ final class LureliaEventService: ObservableObject {
 
     func saveToAppleCalendar(_ event: LureliaEvent, calendarIdentifier: String?) throws {
         guard hasCalendarAccess else { return }
+        if !event.isAppleImportedShadow {
+            event.markNativeLureliaEvent()
+        }
 
         let appleEvent: EKEvent
         if let identifier = event.appleEventIdentifier,
@@ -325,6 +328,9 @@ final class LureliaEventService: ObservableObject {
         let existing = (try? context.fetch(descriptor)) ?? []
 
         var didInsertOrUpdate = false
+        for event in existing where event.applyInferredEventOriginIfNeeded() {
+            didInsertOrUpdate = true
+        }
 
         for external in uniqueOccurrences {
             // Fetch the master EKEvent so we work from authoritative
@@ -347,6 +353,7 @@ final class LureliaEventService: ObservableObject {
                 appleEventIdentifier: external.appleEventIdentifier,
                 appleOccurrenceKey: external.appleOccurrenceKey
             ) {
+                target.markAppleImportedShadow()
                 target.appleOccurrenceKey = external.appleOccurrenceKey
                 for duplicate in candidates where duplicate.id != target.id {
                     mergeAppleShadow(duplicate, into: target)
@@ -406,6 +413,7 @@ final class LureliaEventService: ObservableObject {
             } else {
                 let target = LureliaEvent()
                 context.insert(target)
+                target.markAppleImportedShadow()
                 applyAppleOwnedFields(
                     to: target,
                     from: ekEvent,
@@ -438,6 +446,7 @@ final class LureliaEventService: ObservableObject {
         from ekEvent: EKEvent,
         calendarIdentifier: String
     ) {
+        target.markAppleImportedShadow()
         target.title = ekEvent.title ?? "Untitled Event"
         target.eventDescription = ekEvent.notes
         target.locationName = ekEvent.location
@@ -466,6 +475,8 @@ final class LureliaEventService: ObservableObject {
     }
 
     private func mergeAppleShadow(_ duplicate: LureliaEvent, into target: LureliaEvent) {
+        target.markAppleImportedShadow()
+
         if target.calendar == nil {
             target.calendar = duplicate.calendar
         }

@@ -946,6 +946,7 @@ struct LureliaEventEditorView: View {
             modelContext.insert(target)
         }
 
+        target.markNativeLureliaEvent()
         target.title = title.trimmingCharacters(in: .whitespacesAndNewlines)
         target.eventDescription = description.trimmingCharacters(in: .whitespacesAndNewlines).nonEmptyOrNil
         target.icon = icon

@@ -6,6 +6,11 @@
 import Foundation
 import SwiftData
 
+enum LureliaEventOrigin: String, Codable {
+    case nativeLurelia
+    case appleImportedShadow
+}
+
 @Model
 final class LureliaEvent {
     var id: UUID = UUID()
@@ -44,6 +49,10 @@ final class LureliaEvent {
     /// have a Lurelia primary calendar, so this cache is the color authority
     /// for those shadow records in the app and widgets.
     var appleCalendarColor: String?
+    /// Persisted source of the row. Apple identifiers are sync/link metadata,
+    /// not ownership: native Lurelia events can have them after being mirrored
+    /// to Apple Calendar. This field is the routing/color authority.
+    var eventOriginRaw: String?
     var syncsWithAppleCalendar: Bool = false
     /// The `EKEvent.lastModifiedDate` we last synced with. Used by
     /// `LureliaEventService.importAppleEvents` to skip re-writing this row
@@ -195,6 +204,101 @@ extension LureliaEvent {
         color.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? "#03dbfc" : color
     }
 
+    var eventOrigin: LureliaEventOrigin {
+        if let raw = eventOriginRaw?.trimmingCharacters(in: .whitespacesAndNewlines),
+           let origin = LureliaEventOrigin(rawValue: raw) {
+            return origin
+        }
+
+        return inferredEventOrigin
+    }
+
+    var isAppleImportedShadow: Bool {
+        eventOrigin == .appleImportedShadow
+    }
+
+    func markNativeLureliaEvent() {
+        eventOriginRaw = LureliaEventOrigin.nativeLurelia.rawValue
+    }
+
+    func markAppleImportedShadow() {
+        eventOriginRaw = LureliaEventOrigin.appleImportedShadow.rawValue
+    }
+
+    @discardableResult
+    func applyInferredEventOriginIfNeeded() -> Bool {
+        let current = eventOriginRaw?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        guard current.isEmpty || LureliaEventOrigin(rawValue: current) == nil else {
+            return false
+        }
+
+        eventOriginRaw = inferredEventOrigin.rawValue
+        return true
+    }
+
+    private var inferredEventOrigin: LureliaEventOrigin {
+        let appleIdentifier = appleEventIdentifier?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        let appleCalendarID = appleCalendarIdentifier?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        let occurrenceKey = appleOccurrenceKey?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+
+        guard !appleIdentifier.isEmpty || !appleCalendarID.isEmpty || !occurrenceKey.isEmpty else {
+            return .nativeLurelia
+        }
+
+        if hasStrongNativeLureliaAuthoringSignals {
+            return .nativeLurelia
+        }
+
+        if !occurrenceKey.isEmpty {
+            return .appleImportedShadow
+        }
+
+        if calendar == nil, !appleCalendarID.isEmpty {
+            return .appleImportedShadow
+        }
+
+        if hasNativeLureliaColorSignal {
+            return .nativeLurelia
+        }
+
+        return .nativeLurelia
+    }
+
+    private var hasStrongNativeLureliaAuthoringSignals: Bool {
+        let iconName = icon?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        if !iconName.isEmpty, iconName != "starcal" {
+            return true
+        }
+
+        if categoryName?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false {
+            return true
+        }
+
+        if recurrence != nil {
+            return true
+        }
+
+        if (notifications ?? []).isEmpty == false ||
+            (attachments ?? []).isEmpty == false ||
+            (tags ?? []).isEmpty == false {
+            return true
+        }
+
+        return false
+    }
+
+    private var hasNativeLureliaColorSignal: Bool {
+        let appleColor = appleCalendarColor?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        let localColor = color.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !appleColor.isEmpty,
+           !localColor.isEmpty,
+           appleColor.caseInsensitiveCompare(localColor) != .orderedSame {
+            return true
+        }
+
+        return false
+    }
+
     var resolvedAppleOccurrenceKey: String? {
         if let key = appleOccurrenceKey?.trimmingCharacters(in: .whitespacesAndNewlines),
            !key.isEmpty {
@@ -220,7 +324,7 @@ extension LureliaEvent {
     /// - Apple-imported shadow events use their source Apple calendar color.
     /// - Older/unassigned rows fall back to the event's own stored color.
     var displayColorHex: String {
-        if appleEventIdentifier != nil || appleCalendarIdentifier != nil,
+        if isAppleImportedShadow,
            let appleColor = appleCalendarColor?.trimmingCharacters(in: .whitespacesAndNewlines),
            !appleColor.isEmpty {
             return appleColor
@@ -403,7 +507,7 @@ extension LureliaEvent {
             start: start,
             end: end,
             isAllDay: isAllDay,
-            isAppleCalendarEvent: appleEventIdentifier != nil
+            isAppleCalendarEvent: isAppleImportedShadow
         )
     }
 }
@@ -443,6 +547,7 @@ extension LureliaEvent {
         guard !identifier.isEmpty, !key.isEmpty else { return [] }
 
         let exactMatches = events.filter {
+            $0.isAppleImportedShadow &&
             ($0.appleOccurrenceKey ?? "").trimmingCharacters(in: .whitespacesAndNewlines) == key
         }
         if !exactMatches.isEmpty {
@@ -453,6 +558,7 @@ extension LureliaEvent {
         // Only rows without an occurrence key are considered here; keyed rows
         // must match by key so recurring occurrences remain separate.
         return events.filter {
+            guard $0.isAppleImportedShadow else { return false }
             let storedIdentifier = ($0.appleEventIdentifier ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
             let storedKey = ($0.appleOccurrenceKey ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
             return storedIdentifier == identifier && storedKey.isEmpty

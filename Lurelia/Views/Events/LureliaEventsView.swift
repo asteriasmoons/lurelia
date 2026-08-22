@@ -98,7 +98,8 @@ struct LureliaEventsView: View {
 
                 // Rule 2: imported Apple-owned events with no Lurelia
                 // primary — honor the user's Apple calendar visibility.
-                if event.calendar == nil,
+                if event.isAppleImportedShadow,
+                   event.calendar == nil,
                    let appleID = event.appleCalendarIdentifier,
                    !appleID.isEmpty,
                    hasConfiguredApple,
@@ -190,6 +191,7 @@ struct LureliaEventsView: View {
         }
         .task {
             eventService.refreshAuthorizationStatus()
+            migrateEventOriginsIfNeeded()
             loadExternalOccurrences()
             if let savedTab = LureliaEventsTab(rawValue: settingsObject.defaultEventsViewRaw) {
                 selectedTab = savedTab
@@ -359,12 +361,10 @@ struct LureliaEventsView: View {
     private func selectEvent(_ occurrence: LureliaEventOccurrence) {
         guard let event = events.first(where: { $0.id == occurrence.eventID }) else { return }
 
-        let appleIdentifier = event.appleEventIdentifier?
-            .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-        if appleIdentifier.isEmpty {
-            selectedEvent = event
-        } else {
+        if event.isAppleImportedShadow {
             selectedAppleShadowEvent = event
+        } else {
+            selectedEvent = event
         }
     }
 
@@ -437,6 +437,17 @@ struct LureliaEventsView: View {
         }
         if LureliaWidgetShared.saveExternalEventSnapshots(widgetSnapshots) {
             LureliaWidgetReloads.reloadAll()
+        }
+    }
+
+    private func migrateEventOriginsIfNeeded() {
+        var didChange = false
+        for event in events where event.applyInferredEventOriginIfNeeded() {
+            didChange = true
+        }
+
+        if didChange {
+            try? modelContext.save()
         }
     }
 }

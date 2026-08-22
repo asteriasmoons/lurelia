@@ -26,6 +26,7 @@ struct LureliaAppleEventDetailView: View {
     @Query(sort: \LureliaCalendar.name) private var lureliaCalendars: [LureliaCalendar]
     @Query(sort: \LureliaEvent.startDate) private var importedEvents: [LureliaEvent]
     @State private var isCalendarDropdownExpanded = false
+    @State private var isIconPickerPresented = false
 
     init(occurrence: LureliaExternalCalendarOccurrence) {
         self.source = .liveOccurrence(occurrence)
@@ -87,6 +88,18 @@ struct LureliaAppleEventDetailView: View {
             }
             .navigationBarBackButtonHidden(true)
             .toolbar(.hidden, for: .navigationBar)
+            .sheet(isPresented: $isIconPickerPresented) {
+                if let importedEvent {
+                    LureliaIconPickerView(selectedIcon: Binding(
+                        get: { importedEvent.displayIcon },
+                        set: { newIcon in
+                            importedEvent.icon = newIcon
+                            importedEvent.modifiedDate = Date()
+                            try? modelContext.save()
+                        }
+                    ))
+                }
+            }
         }
     }
 
@@ -126,8 +139,15 @@ struct LureliaAppleEventDetailView: View {
                         .fill(Color.white.opacity(0.10))
                         .frame(width: 70, height: 70)
 
-                    LureliaIconView(iconId: displayIcon, size: 36)
-                        .foregroundStyle(.white)
+                    Button {
+                        if importedEvent != nil {
+                            isIconPickerPresented = true
+                        }
+                    } label: {
+                        LureliaIconView(iconId: displayIcon, size: 36)
+                            .foregroundStyle(.white)
+                    }
+                    .buttonStyle(.plain)
                 }
 
                 Text(title.isEmpty ? "Untitled" : title)
@@ -574,6 +594,7 @@ struct LureliaAppleEventDetailView: View {
         guard !appleEventIdentifier.isEmpty, !appleOccurrenceKey.isEmpty else { return }
 
         let target = importedEvent ?? makeImportedEventShadow()
+        target.markAppleImportedShadow()
         target.appleEventIdentifier = appleEventIdentifier
         target.appleOccurrenceKey = appleOccurrenceKey
         target.calendar = calendar
@@ -603,6 +624,7 @@ struct LureliaAppleEventDetailView: View {
         target.appleCalendarIdentifier = appleCalendarIdentifier
         target.appleCalendarTitle = appleCalendarTitle.trimmingCharacters(in: .whitespacesAndNewlines)
         target.appleCalendarColor = sourceColorHex
+        target.markAppleImportedShadow()
         target.syncsWithAppleCalendar = true
         target.createdDate = Date()
         target.modifiedDate = Date()
@@ -624,6 +646,8 @@ struct LureliaAppleEventDetailView: View {
     }
 
     private func mergeImportedShadow(_ duplicate: LureliaEvent, into target: LureliaEvent) {
+        target.markAppleImportedShadow()
+
         if target.calendar == nil {
             target.calendar = duplicate.calendar
         }

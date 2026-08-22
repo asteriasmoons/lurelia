@@ -152,7 +152,8 @@ struct LureliaUpcomingEventsProvider: AppIntentTimelineProvider {
 
                 // Imported Apple-owned events with no Lurelia primary mirror
                 // the main Events page visibility rule.
-                if primary == nil,
+                if event.isAppleImportedShadow,
+                   primary == nil,
                    let appleID = event.appleCalendarIdentifier,
                    !appleID.isEmpty,
                    hasConfiguredApple,
@@ -278,12 +279,18 @@ private func eventWidgetColorHex(
     primary: LureliaCalendar?,
     occurrence: LureliaEventOccurrence
 ) -> String {
-    event.appleCalendarColor?
+    let primaryColor = primary?.color
         .trimmingCharacters(in: .whitespacesAndNewlines)
         .nonEmptyOrNilForWidget
-    ?? primary?.color
+
+    if event.isAppleImportedShadow,
+       let appleColor = event.appleCalendarColor?
         .trimmingCharacters(in: .whitespacesAndNewlines)
-        .nonEmptyOrNilForWidget
+        .nonEmptyOrNilForWidget {
+        return appleColor
+    }
+
+    return primaryColor
     ?? occurrence.colorHex
         .trimmingCharacters(in: .whitespacesAndNewlines)
         .nonEmptyOrNilForWidget
@@ -461,9 +468,13 @@ struct LureliaUpcomingEventsWidgetView: View {
     }
 
     @ViewBuilder
-    private func widgetIcon(_ name: String, tint: Color, size: CGFloat) -> some View {
-        let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
-        let iconName = trimmed.isEmpty ? "starcal" : trimmed
+    private func widgetIcon(
+        _ name: String,
+        tint: Color,
+        size: CGFloat
+    ) -> some View {
+        let trimmedName = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        let iconName = trimmedName.isEmpty ? "starcal" : trimmedName
 
         if let uiImage = LureliaWidgetShared.widgetIcon(for: iconName) {
             tint
