@@ -26,8 +26,8 @@ enum ReminderActionManager {
             print("❌ Reminder delete save failed: \(error)")
         }
 
-        WidgetCenter.shared.reloadTimelines(ofKind: "LureliaDueRemindersWidget")
-        WidgetCenter.shared.reloadTimelines(ofKind: "LureliaHabitsWidget")
+        LureliaWidgetReloads.reloadAll()
+        LureliaWidgetReloads.reloadAll()
     }
 
     // MARK: - Complete
@@ -77,8 +77,8 @@ enum ReminderActionManager {
             print("❌ Reminder completion save failed: \(error)")
         }
 
-        WidgetCenter.shared.reloadTimelines(ofKind: "LureliaDueRemindersWidget")
-        WidgetCenter.shared.reloadTimelines(ofKind: "LureliaHabitsWidget")
+        LureliaWidgetReloads.reloadAll()
+        LureliaWidgetReloads.reloadAll()
 
         if reminder.repeatUnit != .none && reminder.isEnabled {
             await LureliaNotificationManager.shared.scheduleReminder(reminder)
@@ -130,8 +130,8 @@ enum ReminderActionManager {
             print("❌ Reminder skip save failed: \(error)")
         }
 
-        WidgetCenter.shared.reloadTimelines(ofKind: "LureliaDueRemindersWidget")
-        WidgetCenter.shared.reloadTimelines(ofKind: "LureliaHabitsWidget")
+        LureliaWidgetReloads.reloadAll()
+        LureliaWidgetReloads.reloadAll()
 
         if reminder.isEnabled {
             await LureliaNotificationManager.shared.scheduleReminder(reminder)

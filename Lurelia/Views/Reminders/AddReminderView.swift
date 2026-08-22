@@ -8,6 +8,7 @@ import SwiftData
 import UserNotifications
 import WidgetKit
 import MapKit
+import AVFoundation
 
 struct AddReminderView: View {
     @Environment(\.modelContext) private var modelContext
@@ -35,6 +36,13 @@ struct AddReminderView: View {
     @State private var reminderHour = 9
     @State private var reminderMinute = 0
     @State private var additionalFireTimes: [LureliaAdditionalFireTime] = []
+    @State private var alarmEnabled = false
+    @State private var alarmDate = Date()
+    @State private var alarmHour = 9
+    @State private var alarmMinute = 0
+    @State private var alarmSoundName = LureliaReminderAlarmSound.defaultSound.fileName
+    @State private var alarmFireTimes: Set<String> = []
+    @State private var showAlarmConfig = false
     
     @State private var repeatUnit: LureliaReminderRepeatUnit = .none
     @State private var repeatInterval = 1
@@ -55,7 +63,47 @@ struct AddReminderView: View {
     @State private var locationSearchText = ""
     @State private var locationSearchResults: [MKMapItem] = []
     @State private var showLocationSearch = false
-    
+
+    /// User-selected reminder color. In create mode this stays `nil` so the
+    /// sheet uses the frosty white translucent glass aesthetic. In edit mode
+    /// it is loaded from the reminder's saved `colorHex` and drives every
+    /// visual accent throughout the sheet.
+    @State private var selectedColor: Color? = nil
+
+    /// The tint every in-sheet control accent uses.
+    /// - Edit mode: the reminder's saved color (once loaded)
+    /// - New mode: neutral pearl accents over normal dark glass
+    private var formTint: Color {
+        selectedColor ?? LColors.neutralPearl.opacity(0.62)
+    }
+
+    private var formTintSurfaceStyle: AnyShapeStyle {
+        if let selectedColor {
+            return AnyShapeStyle(selectedColor.opacity(0.16))
+        }
+        return AnyShapeStyle(Color.clear)
+    }
+
+    private var formTintBorderColor: Color {
+        selectedColor?.opacity(0.78) ?? LColors.glassBorder
+    }
+
+    private var accentFillStyle: AnyShapeStyle {
+        if let selectedColor {
+            return AnyShapeStyle(selectedColor)
+        }
+        return AnyShapeStyle(LColors.glassSurface2)
+    }
+
+    private var accentTextColor: Color {
+        selectedColor?.wcagContrastingSolidTextColor ?? LColors.textPrimary
+    }
+
+    /// Shared accent for glyphs and selected controls.
+    private var accentStyle: AnyShapeStyle {
+        AnyShapeStyle(formTint)
+    }
+
     private let weekdays: [(label: String, value: Int)] = [
         ("Su", 1), ("Mo", 2), ("Tu", 3), ("We", 4),
         ("Th", 5), ("Fr", 6), ("Sa", 7)
@@ -96,6 +144,27 @@ struct AddReminderView: View {
         return ([scheduledDate] + extraDates).sorted()
     }
 
+    private var alarmScheduledDate: Date {
+        var components = Calendar.current.dateComponents(
+            [.year, .month, .day],
+            from: alarmDate
+        )
+
+        components.hour = alarmHour
+        components.minute = alarmMinute
+        components.second = 0
+
+        return Calendar.current.date(from: components) ?? scheduledDate
+    }
+
+    private var currentAlarmFireTimes: [String] {
+        allCurrentFireTimes().map { String(format: "%02d:%02d", $0.hour, $0.minute) }
+    }
+
+    private var useFullScreenCover: Bool {
+        UIDevice.current.userInterfaceIdiom == .pad
+    }
+
     private func repeatUnitText(for unit: LureliaReminderRepeatUnit) -> String {
         switch unit {
         case .none:
@@ -121,10 +190,9 @@ struct AddReminderView: View {
                 LureliaBackgroundAlt()
                     .contentShape(Rectangle())
                     .onTapGesture {
-                        notesFieldIsFocused = false
-                        focusedChecklistItemID = nil
+                        dismissKeyboardEverywhere()
                     }
-                
+
                 ScrollView(showsIndicators: false) {
                     VStack(spacing: 22) {
                         previewCard
@@ -152,15 +220,15 @@ struct AddReminderView: View {
                                 HStack(spacing: 12) {
                                     ZStack {
                                         Circle()
-                                            .fill(Color.white.opacity(0.14))
+                                            .fill(LColors.glassSurface2)
                                             .frame(width: 44, height: 44)
                                             .overlay(
                                                 Circle()
-                                                    .strokeBorder(LGradients.header, lineWidth: 1.4)
+                                                    .strokeBorder(accentStyle, lineWidth: 1.4)
                                             )
 
                                         LureliaIconView(iconId: selectedIcon, size: 22)
-                                            .foregroundStyle(LGradients.header)
+                                            .foregroundStyle(accentStyle)
                                     }
 
                                     VStack(alignment: .leading, spacing: 3) {
@@ -180,22 +248,17 @@ struct AddReminderView: View {
                                         .resizable()
                                         .scaledToFit()
                                         .frame(width: 18, height: 18)
-                                        .foregroundStyle(LGradients.header)
+                                        .foregroundStyle(accentStyle)
                                 }
                                 .contentShape(Rectangle())
                             }
                             .buttonStyle(.plain)
                         }
 
+                        colorPickerField
+
                         field("Date") {
-                            DatePicker(
-                                "Reminder date",
-                                selection: $reminderDate,
-                                displayedComponents: [.date]
-                            )
-                            .datePickerStyle(.compact)
-                            .tint(LColors.gradientBlue)
-                            .foregroundStyle(LColors.textPrimary)
+                            LureliaGradientDateDrumPicker(date: $reminderDate)
                         }
                         
                         field("Time") {
@@ -208,33 +271,21 @@ struct AddReminderView: View {
                         field("Additional Times") {
                             additionalFireTimesSection
                         }
+
+                        field("Alarm") {
+                            alarmSection
+                        }
                         
                         field("Repeat") {
                             repeatSection
                         }
 
-                        // Detail fields
+                        // Motivation / Consequences / Recovery Plan hidden
+                        // from the UI. The underlying model fields
+                        // (`motivation`, `consequences`, `recoveryPlan`) are
+                        // still saved/loaded via `populate()` and `save()` so
+                        // any existing data survives round-trips.
 
-                        field("Motivation") {
-                            TextField("What makes this reminder worth doing?", text: $motivation, axis: .vertical)
-                                .lineLimit(3, reservesSpace: true)
-                                .font(.system(size: 15, design: .rounded))
-                                .foregroundStyle(LColors.textPrimary)
-                        }
-
-                        field("Consequences") {
-                            TextField("What happens if this gets skipped or ignored?", text: $consequences, axis: .vertical)
-                                .lineLimit(3, reservesSpace: true)
-                                .font(.system(size: 15, design: .rounded))
-                                .foregroundStyle(LColors.textPrimary)
-                        }
-
-                        field("Recovery Plan") {
-                            TextField("How do I recover if this does not go as planned?", text: $recoveryPlan, axis: .vertical)
-                                .lineLimit(3, reservesSpace: true)
-                                .font(.system(size: 15, design: .rounded))
-                                .foregroundStyle(LColors.textPrimary)
-                        }
                         // Location
 
                         locationField
@@ -244,12 +295,12 @@ struct AddReminderView: View {
                         } label: {
                             Text(isEditing ? "Save Reminder" : "Create Reminder")
                                 .font(.system(size: 16, weight: .black, design: .rounded))
-                                .foregroundStyle(.white)
+                                .foregroundStyle(accentTextColor)
                                 .frame(maxWidth: .infinity)
                                 .frame(height: 58)
                                 .background(
                                     RoundedRectangle(cornerRadius: 22, style: .continuous)
-                                        .fill(LGradients.header)
+                                        .fill(accentFillStyle)
                                 )
                                 .overlay(
                                     RoundedRectangle(cornerRadius: 22, style: .continuous)
@@ -266,7 +317,16 @@ struct AddReminderView: View {
                     .padding(.horizontal, 20)
                     .padding(.top, 18)
                 }
+                // Swipe/drag down inside the scroll dismisses the keyboard
+                // interactively; supplements the tap-outside dismiss below.
+                .scrollDismissesKeyboard(.interactively)
             }
+            // Tap anywhere outside a focused text field dismisses the
+            // keyboard. Attached to the whole NavigationStack so it also
+            // covers taps on non-focusable text/labels above/below inputs.
+            .simultaneousGesture(
+                TapGesture().onEnded { dismissKeyboardEverywhere() }
+            )
             .navigationTitle(isEditing ? "Edit Reminder" : "New Reminder")
             .navigationBarTitleDisplayMode(.inline)
             .toolbarBackground(.hidden, for: .navigationBar)
@@ -287,18 +347,7 @@ struct AddReminderView: View {
                             )
                             .overlay(
                                 Capsule()
-                                    .strokeBorder(
-                                        LinearGradient(
-                                            colors: [
-                                                LColors.gradientBlue.opacity(0.95),
-                                                LColors.gradientPurple.opacity(0.95),
-                                                Color.white.opacity(0.55)
-                                            ],
-                                            startPoint: .topLeading,
-                                            endPoint: .bottomTrailing
-                                        ),
-                                        lineWidth: 1.1
-                                    )
+                                    .strokeBorder(LColors.glassBorder, lineWidth: 1.1)
                             )
                             .contentShape(Capsule())
                     }
@@ -312,6 +361,28 @@ struct AddReminderView: View {
         .sheet(isPresented: $showIconPicker) {
             IconPickerView(selectedIcon: $selectedIcon)
         }
+        .sheet(isPresented: Binding(
+            get: { !useFullScreenCover && showAlarmConfig },
+            set: { showAlarmConfig = $0 }
+        )) {
+            alarmConfigSheet
+        }
+        .fullScreenCover(isPresented: Binding(
+            get: { useFullScreenCover && showAlarmConfig },
+            set: { showAlarmConfig = $0 }
+        )) {
+            alarmConfigSheet
+        }
+    }
+
+    private var alarmConfigSheet: some View {
+            LureliaReminderAlarmConfigSheet(
+                alarmEnabled: $alarmEnabled,
+                availableFireTimes: currentAlarmFireTimes,
+                selectedFireTimes: $alarmFireTimes,
+                alarmSoundName: $alarmSoundName,
+                tint: selectedColor
+            )
     }
     
     private var previewCard: some View {
@@ -319,15 +390,15 @@ struct AddReminderView: View {
             HStack(spacing: 14) {
                 ZStack {
                     Circle()
-                        .fill(Color.white.opacity(0.14))
+                        .fill(LColors.glassSurface2)
                         .frame(width: 58, height: 58)
                         .overlay(
                             Circle()
-                                .strokeBorder(LGradients.header, lineWidth: 1.6)
+                                .strokeBorder(accentStyle, lineWidth: 1.6)
                         )
 
                     LureliaIconView(iconId: selectedIcon, size: 28)
-                        .foregroundStyle(LGradients.header)
+                        .foregroundStyle(accentStyle)
                 }
 
                 VStack(alignment: .leading, spacing: 5) {
@@ -338,11 +409,21 @@ struct AddReminderView: View {
 
                     Text(scheduledDate.formatted(date: .abbreviated, time: .omitted))
                         .font(.system(size: 13, weight: .semibold, design: .rounded))
-                        .foregroundStyle(LColors.gradientBlue)
+                        .foregroundStyle(LColors.textSecondary)
                         .lineLimit(2)
                 }
 
                 Spacer()
+            }
+
+            // Description / notes — wraps freely to as many lines as needed.
+            let trimmedNotes = notes.trimmingCharacters(in: .whitespacesAndNewlines)
+            if !trimmedNotes.isEmpty {
+                Text(trimmedNotes)
+                    .font(.system(size: 13, design: .rounded))
+                    .foregroundStyle(LColors.textPrimary.opacity(0.85))
+                    .fixedSize(horizontal: false, vertical: true)
+                    .frame(maxWidth: .infinity, alignment: .leading)
             }
 
             LazyVGrid(
@@ -368,23 +449,22 @@ struct AddReminderView: View {
                     .padding(.vertical, 6)
                     .background(LColors.glassSurface2, in: Capsule())
             }
+
+            if alarmEnabled {
+                Text("Alarm \(alarmScheduledDate.formatted(date: .abbreviated, time: .shortened))")
+                    .font(.system(size: 12, weight: .semibold, design: .rounded))
+                    .foregroundStyle(LColors.textPrimary)
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 6)
+                    .background(formTintSurfaceStyle, in: Capsule())
+            }
         }
         .padding(18)
-        .background(LColors.glassSurface, in: RoundedRectangle(cornerRadius: 26))
+        .background(LColors.glassSurface2, in: RoundedRectangle(cornerRadius: 26))
+        .background(formTintSurfaceStyle, in: RoundedRectangle(cornerRadius: 26))
         .overlay(
             RoundedRectangle(cornerRadius: 26)
-                .strokeBorder(
-                    LinearGradient(
-                        colors: [
-                            LColors.gradientBlue.opacity(0.95),
-                            LColors.gradientPurple.opacity(0.95),
-                            Color.white.opacity(0.55)
-                        ],
-                        startPoint: .topLeading,
-                        endPoint: .bottomTrailing
-                    ),
-                    lineWidth: 1.2
-                )
+                .strokeBorder(formTintBorderColor, lineWidth: 1.2)
         )
     }
     private var checklistField: some View {
@@ -418,7 +498,7 @@ struct AddReminderView: View {
                             .renderingMode(.template)
                             .resizable()
                             .scaledToFit()
-                            .foregroundStyle(LGradients.header)
+                            .foregroundStyle(accentStyle)
                             .frame(width: 24, height: 24)
                     }
                     .buttonStyle(.plain)
@@ -432,29 +512,19 @@ struct AddReminderView: View {
             }
             .padding(14)
             .frame(maxWidth: .infinity, alignment: .leading)
-            .background(LColors.glassSurface, in: RoundedRectangle(cornerRadius: 18))
+            .background(LColors.glassSurface2, in: RoundedRectangle(cornerRadius: 18))
+            .background(formTintSurfaceStyle, in: RoundedRectangle(cornerRadius: 18))
             .overlay(
                 RoundedRectangle(cornerRadius: 18)
-                    .strokeBorder(
-                        LinearGradient(
-                            colors: [
-                                LColors.gradientBlue.opacity(0.85),
-                                LColors.gradientPurple.opacity(0.85),
-                                Color.white.opacity(0.35)
-                            ],
-                            startPoint: .topLeading,
-                            endPoint: .bottomTrailing
-                        ),
-                        lineWidth: 1.1
-                    )
+                    .strokeBorder(formTintBorderColor, lineWidth: 1.1)
             )
         }
     }
-    
+
     private func checklistRow(_ item: LureliaReminderChecklistItem) -> some View {
         HStack(spacing: 10) {
             Circle()
-                .strokeBorder(LGradients.header, lineWidth: 1.4)
+                .strokeBorder(accentStyle, lineWidth: 1.4)
                 .frame(width: 20, height: 20)
 
             TextField("Step", text: checklistTitleBinding(for: item.id))
@@ -597,17 +667,7 @@ struct AddReminderView: View {
                         .background(LColors.glassSurface2, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
                         .overlay(
                             RoundedRectangle(cornerRadius: 16, style: .continuous)
-                                .strokeBorder(
-                                    LinearGradient(
-                                        colors: [
-                                            LColors.gradientBlue.opacity(0.78),
-                                            LColors.gradientPurple.opacity(0.78)
-                                        ],
-                                        startPoint: .topLeading,
-                                        endPoint: .bottomTrailing
-                                    ),
-                                    lineWidth: 1
-                                )
+                                .strokeBorder(LColors.glassBorder, lineWidth: 1)
                         )
                     }
                 }
@@ -623,10 +683,10 @@ struct AddReminderView: View {
                     Text("Add Another Time")
                         .font(.system(size: 13, weight: .black, design: .rounded))
                 }
-                .foregroundStyle(.white)
+                .foregroundStyle(accentTextColor)
                 .frame(maxWidth: .infinity)
                 .padding(.vertical, 12)
-                .background(LGradients.header, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+                .background(accentFillStyle, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
             }
             .buttonStyle(.plain)
         }
@@ -639,6 +699,89 @@ struct AddReminderView: View {
                     minute: reminderMinute
                 )
             )
+        }
+    }
+
+    private var alarmSection: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            Toggle(isOn: alarmEnabledBinding) {
+                VStack(alignment: .leading, spacing: 3) {
+                    Text(alarmEnabled ? "Alarm On" : "Alarm Off")
+                        .font(.system(size: 14, weight: .black, design: .rounded))
+                        .foregroundStyle(LColors.textPrimary)
+
+                    Text(alarmEnabled ? alarmSummaryText : "Use a system alarm for this reminder.")
+                        .font(.system(size: 12, design: .rounded))
+                        .foregroundStyle(LColors.textSecondary.opacity(0.78))
+                        .lineLimit(2)
+                }
+            }
+            .tint(formTint)
+
+            if alarmEnabled {
+                Button {
+                    showAlarmConfig = true
+                } label: {
+                    HStack(spacing: 12) {
+                        Image(systemName: "alarm.fill")
+                            .font(.system(size: 16, weight: .bold))
+                            .foregroundStyle(accentStyle)
+                            .frame(width: 36, height: 36)
+                            .background(LColors.glassSurface2, in: Circle())
+
+                        VStack(alignment: .leading, spacing: 3) {
+                            Text("Alarm Settings")
+                                .font(.system(size: 13, weight: .black, design: .rounded))
+                                .foregroundStyle(LColors.textPrimary)
+
+                            Text(alarmSummaryText)
+                                .font(.system(size: 12, design: .rounded))
+                                .foregroundStyle(LColors.textSecondary.opacity(0.78))
+                                .lineLimit(2)
+                        }
+
+                        Spacer()
+
+                        Image(systemName: "chevron.right")
+                            .font(.system(size: 12, weight: .black))
+                            .foregroundStyle(LColors.textSecondary)
+                    }
+                    .padding(12)
+                    .background(LColors.glassSurface2, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+                }
+                .buttonStyle(.plain)
+            }
+        }
+    }
+
+    private var alarmEnabledBinding: Binding<Bool> {
+        Binding(
+            get: { alarmEnabled },
+            set: { newValue in
+                alarmEnabled = newValue
+                if newValue {
+                    if alarmScheduledDate < Date() {
+                        syncAlarmDateToReminder()
+                    }
+                    showAlarmConfig = true
+                }
+            }
+        )
+    }
+
+    private var alarmSummaryText: String {
+        let sound = LureliaReminderAlarmSound.sound(named: alarmSoundName).displayName
+        let selectedCount = alarmFireTimes.intersection(Set(currentAlarmFireTimes)).count
+        let countText = selectedCount == 1 ? "1 time" : "\(selectedCount) times"
+        return "\(countText) • \(sound)"
+    }
+
+    private func syncAlarmDateToReminder() {
+        alarmDate = reminderDate
+        alarmHour = reminderHour
+        alarmMinute = reminderMinute
+        if alarmFireTimes.isEmpty {
+            alarmFireTimes = Set([String(format: "%02d:%02d", reminderHour, reminderMinute)])
         }
     }
 
@@ -685,7 +828,7 @@ struct AddReminderView: View {
                             .renderingMode(.template)
                             .resizable().scaledToFit()
                             .frame(width: 14, height: 14)
-                            .foregroundStyle(LGradients.header)
+                            .foregroundStyle(accentStyle)
 
                         Text(locationAddress.isEmpty ? "Location selected" : locationAddress)
                             .font(.system(size: 12, design: .rounded))
@@ -747,7 +890,7 @@ struct AddReminderView: View {
                                         .renderingMode(.template)
                                         .resizable().scaledToFit()
                                         .frame(width: 14, height: 14)
-                                        .foregroundStyle(LGradients.header)
+                                        .foregroundStyle(accentStyle)
 
                                     VStack(alignment: .leading, spacing: 2) {
                                         Text(item.name ?? "Unknown")
@@ -784,21 +927,11 @@ struct AddReminderView: View {
             }
             .padding(14)
             .frame(maxWidth: .infinity, alignment: .leading)
-            .background(LColors.glassSurface, in: RoundedRectangle(cornerRadius: 18))
+            .background(LColors.glassSurface2, in: RoundedRectangle(cornerRadius: 18))
+            .background(formTintSurfaceStyle, in: RoundedRectangle(cornerRadius: 18))
             .overlay(
                 RoundedRectangle(cornerRadius: 18)
-                    .strokeBorder(
-                        LinearGradient(
-                            colors: [
-                                LColors.gradientBlue.opacity(0.85),
-                                LColors.gradientPurple.opacity(0.85),
-                                Color.white.opacity(0.35)
-                            ],
-                            startPoint: .topLeading,
-                            endPoint: .bottomTrailing
-                        ),
-                        lineWidth: 1.1
-                    )
+                    .strokeBorder(formTintBorderColor, lineWidth: 1.1)
             )
         }
     }
@@ -845,12 +978,12 @@ struct AddReminderView: View {
                     } label: {
                         Text(repeatUnitText(for: unit))
                             .font(.system(size: 11, weight: .bold, design: .rounded))
-                            .foregroundStyle(repeatUnit == unit ? .white : LColors.textSecondary)
+                            .foregroundStyle(repeatUnit == unit ? accentTextColor : LColors.textSecondary)
                             .frame(maxWidth: .infinity)
                             .padding(.vertical, 10)
                             .background(
                                 repeatUnit == unit
-                                ? AnyShapeStyle(LGradients.header)
+                                ? accentFillStyle
                                 : AnyShapeStyle(LColors.glassSurface2),
                                 in: RoundedRectangle(cornerRadius: 14, style: .continuous)
                             )
@@ -871,7 +1004,7 @@ struct AddReminderView: View {
                             .foregroundStyle(LColors.textSecondary.opacity(0.75))
                     }
                 }
-                .tint(LColors.gradientBlue)
+                .tint(formTint)
                 
                 if repeatUnit == .weeks {
                     HStack(spacing: 6) {
@@ -885,11 +1018,11 @@ struct AddReminderView: View {
                             } label: {
                                 Text(day.label)
                                     .font(.system(size: 11, weight: .bold, design: .rounded))
-                                    .foregroundStyle(.white)
+                                    .foregroundStyle(repeatWeekdays.contains(day.value) ? accentTextColor : LColors.textSecondary)
                                     .frame(width: 34, height: 34)
                                     .background(
                                         repeatWeekdays.contains(day.value)
-                                        ? AnyShapeStyle(LGradients.header)
+                                        ? accentFillStyle
                                         : AnyShapeStyle(LColors.glassSurface2),
                                         in: Circle()
                                     )
@@ -904,16 +1037,10 @@ struct AddReminderView: View {
                         .font(.system(size: 14, weight: .semibold, design: .rounded))
                         .foregroundStyle(LColors.textPrimary)
                 }
-                .tint(LColors.gradientBlue)
+                .tint(formTint)
                 
                 if repeatEnds {
-                    DatePicker(
-                        "End date",
-                        selection: $repeatEndsAt,
-                        displayedComponents: [.date]
-                    )
-                    .datePickerStyle(.compact)
-                    .tint(LColors.gradientBlue)
+                    LureliaGradientDateDrumPicker(date: $repeatEndsAt)
                 }
             }
         }
@@ -924,6 +1051,63 @@ struct AddReminderView: View {
         return "Repeats every \(repeatInterval) \(repeatUnit.rawValue.lowercased())"
     }
     
+    /// Clear every focus binding in this sheet AND ask UIKit to resign the
+    /// first responder — the belt-and-suspenders way to hide the keyboard
+    /// from any typeable field (title, notes, checklist steps, location
+    /// label/search, repeat interval, etc.) without knowing which one is
+    /// active.
+    private func dismissKeyboardEverywhere() {
+        notesFieldIsFocused = false
+        focusedChecklistItemID = nil
+        UIApplication.shared.sendAction(
+            #selector(UIResponder.resignFirstResponder),
+            to: nil,
+            from: nil,
+            for: nil
+        )
+    }
+
+    /// User picks any reminder color via a native ColorPicker — no preset
+    /// palette. Nil (before any selection in create mode) means the sheet
+    /// keeps its frosty white glass aesthetic.
+    private var colorPickerField: some View {
+        field("Reminder Color") {
+            HStack(spacing: 12) {
+                Text("Choose a color")
+                    .font(.system(size: 14, weight: .semibold, design: .rounded))
+                    .foregroundStyle(LColors.textPrimary)
+
+                Spacer(minLength: 8)
+
+                if selectedColor != nil {
+                    Button {
+                        selectedColor = nil
+                    } label: {
+                        Text("Reset")
+                            .font(.system(size: 12, weight: .semibold, design: .rounded))
+                            .foregroundStyle(LColors.textSecondary)
+                    }
+                    .buttonStyle(.plain)
+                }
+
+                ColorPicker(
+                    "Reminder Color",
+                    selection: colorPickerBinding,
+                    supportsOpacity: false
+                )
+                .labelsHidden()
+                .frame(width: 32, height: 32)
+            }
+        }
+    }
+
+    private var colorPickerBinding: Binding<Color> {
+        Binding(
+            get: { selectedColor ?? Color(lureliaHex: "#7d19f7") },
+            set: { selectedColor = $0 }
+        )
+    }
+
     private func field<Content: View>(
         _ title: String,
         @ViewBuilder content: () -> Content
@@ -936,21 +1120,11 @@ struct AddReminderView: View {
             content()
                 .padding(14)
                 .frame(maxWidth: .infinity, alignment: .leading)
-                .background(LColors.glassSurface, in: RoundedRectangle(cornerRadius: 18))
+                .background(LColors.glassSurface2, in: RoundedRectangle(cornerRadius: 18))
+                .background(formTintSurfaceStyle, in: RoundedRectangle(cornerRadius: 18))
                 .overlay(
                     RoundedRectangle(cornerRadius: 18)
-                        .strokeBorder(
-                            LinearGradient(
-                                colors: [
-                                    LColors.gradientBlue.opacity(0.85),
-                                    LColors.gradientPurple.opacity(0.85),
-                                    Color.white.opacity(0.35)
-                                ],
-                                startPoint: .topLeading,
-                                endPoint: .bottomTrailing
-                            ),
-                            lineWidth: 1.1
-                        )
+                        .strokeBorder(formTintBorderColor, lineWidth: 1.1)
                 )
         }
     }
@@ -964,6 +1138,11 @@ struct AddReminderView: View {
         selectedCategory = ""
         reminderDate = reminder.scheduledDate
 
+        // Load the reminder's saved user-selected color so the Edit sheet
+        // inherits that reminder's visual identity.
+        let trimmedColorHex = reminder.colorHex.trimmingCharacters(in: .whitespacesAndNewlines)
+        selectedColor = Color(lureliaHex: trimmedColorHex.isEmpty ? "#7d19f7" : trimmedColorHex)
+
         // Use the originally configured primary hour/minute, not the advanced scheduledDate
         if reminder.primaryHour != -1 {
             reminderHour = reminder.primaryHour
@@ -974,6 +1153,16 @@ struct AddReminderView: View {
             reminderMinute = components.minute ?? 0
         }
         additionalFireTimes = reminder.additionalFireTimes
+        alarmEnabled = reminder.alarmEnabled
+        alarmDate = reminder.alarmDate ?? reminder.scheduledDate
+        let alarmComponents = Calendar.current.dateComponents([.hour, .minute], from: reminder.alarmDate ?? reminder.scheduledDate)
+        alarmHour = alarmComponents.hour ?? reminderHour
+        alarmMinute = alarmComponents.minute ?? reminderMinute
+        alarmSoundName = reminder.alarmSoundName ?? LureliaReminderAlarmSound.defaultSound.fileName
+        alarmFireTimes = Set(reminder.alarmFireTimes)
+        if alarmEnabled && alarmFireTimes.isEmpty {
+            alarmFireTimes = Set([String(format: "%02d:%02d", alarmHour, alarmMinute)])
+        }
         let existingChecklist = reminder.checklistItems.sorted { $0.sortOrder < $1.sortOrder }
         checklistItems = existingChecklist.isEmpty
             ? [LureliaReminderChecklistItem(title: "", sortOrder: 0)]
@@ -1032,12 +1221,28 @@ struct AddReminderView: View {
         reminder.notes = cleanNotes.isEmpty ? nil : cleanNotes
         reminder.category = ""
         reminder.kind = .standalone
+        // Persist the user-selected color. Only write if the user actually
+        // picked one, so we never clobber an existing reminder's color with
+        // a blank in edit mode when the picker wasn't touched.
+        if let picked = selectedColor, let hex = picked.toHex() {
+            reminder.colorHex = hex
+        }
         reminder.scheduledDate = scheduledDate
         reminder.repeatUnit = repeatUnit
         reminder.repeatInterval = max(1, repeatInterval)
         reminder.repeatWeekdays = Array(repeatWeekdays).sorted()
         reminder.repeatEndsAt = repeatEnds ? repeatEndsAt : nil
         reminder.additionalFireTimes = additionalFireTimes
+
+        let selectedAlarmTimes = normalizedSelectedAlarmTimes()
+        reminder.alarmEnabled = alarmEnabled
+        reminder.alarmDate = alarmEnabled ? alarmDateForSelectedTimes(selectedAlarmTimes) : nil
+        reminder.alarmSoundName = alarmEnabled ? alarmSoundName : nil
+        reminder.alarmFireTimes = alarmEnabled ? selectedAlarmTimes : []
+        reminder.keepAlarmIdentifiers(for: alarmEnabled ? selectedAlarmTimes : [])
+        if alarmEnabled && reminder.alarmID?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty != false {
+            reminder.alarmID = UUID().uuidString
+        }
 
         // Detail fields
         reminder.purpose = nil
@@ -1066,6 +1271,9 @@ struct AddReminderView: View {
         reminder.levels = []
         if scheduleDidChange {
             reminder.nextFireAt = nextUnfiredDateFromCurrentForm()
+            if alarmEnabled && !isEditing {
+                reminder.alarmDate = alarmDateForSelectedTimes(selectedAlarmTimes)
+            }
         }
         reminder.isEnabled = true
         reminder.updatedAt = Date()
@@ -1102,11 +1310,11 @@ struct AddReminderView: View {
         try? modelContext.save()
         if isCreatingNewReminder { onCreated?(reminder) }
 
-        WidgetCenter.shared.reloadTimelines(ofKind: "LureliaDueRemindersWidget")
+        LureliaWidgetReloads.reloadAll()
 
         Task {
             await LureliaNotificationManager.shared.scheduleReminder(reminder)
-            WidgetCenter.shared.reloadTimelines(ofKind: "LureliaDueRemindersWidget")
+            LureliaWidgetReloads.reloadAll()
         }
 
         dismiss()
@@ -1191,6 +1399,33 @@ struct AddReminderView: View {
             }
     }
 
+    private func normalizedSelectedAlarmTimes() -> [String] {
+        let availableTimes = currentAlarmFireTimes
+        let selectedTimes = availableTimes.filter { alarmFireTimes.contains($0) }
+
+        if !selectedTimes.isEmpty {
+            return selectedTimes
+        }
+
+        return alarmEnabled ? Array(availableTimes.prefix(1)) : []
+    }
+
+    private func alarmDateForSelectedTimes(_ selectedTimes: [String]) -> Date? {
+        guard let firstTime = selectedTimes.first else { return nil }
+        let parts = firstTime.split(separator: ":")
+        guard parts.count == 2,
+              let hour = Int(parts[0]),
+              let minute = Int(parts[1]) else {
+            return alarmScheduledDate
+        }
+
+        var components = Calendar.current.dateComponents([.year, .month, .day], from: reminderDate)
+        components.hour = hour
+        components.minute = minute
+        components.second = 0
+        return Calendar.current.date(from: components)
+    }
+
     private func nextRepeatDateAfterCurrentReminderDate() -> Date? {
         let calendar = Calendar.current
         let interval = max(1, repeatInterval)
@@ -1254,6 +1489,387 @@ struct AddReminderView: View {
             normalizedWeekdays,
             endDateKey
         ].joined(separator: "|")
+    }
+}
+
+struct LureliaReminderAlarmSound: Identifiable, Hashable {
+    let fileName: String
+
+    var id: String { fileName }
+
+    var displayName: String {
+        if let mappedName = Self.displayNames[fileName] {
+            return mappedName
+        }
+
+        return URL(fileURLWithPath: fileName)
+            .deletingPathExtension()
+            .lastPathComponent
+            .replacingOccurrences(of: "-", with: " ")
+            .replacingOccurrences(of: "_", with: " ")
+            .split(separator: " ")
+            .map { word in
+                word.prefix(1).uppercased() + word.dropFirst()
+            }
+            .joined(separator: " ")
+    }
+
+    static let displayNames: [String: String] = [
+        "bythesea.m4a": "By The Sea",
+        "circuit.m4a": "Circuit",
+        "constellation.m4a": "Constellation",
+        "crystals.m4a": "Crystals",
+        "nightowl.m4a": "Night Owl",
+        "radiate.m4a": "Radiate",
+        "silk.m4a": "Silk",
+        "summit.m4a": "Summit",
+        "uplift.m4a": "Uplift",
+        "waves.m4a": "Waves"
+    ]
+
+    static let fallbackSounds: [LureliaReminderAlarmSound] = [
+        "bythesea.m4a",
+        "circuit.m4a",
+        "constellation.m4a",
+        "crystals.m4a",
+        "nightowl.m4a",
+        "radiate.m4a",
+        "silk.m4a",
+        "summit.m4a",
+        "uplift.m4a",
+        "waves.m4a"
+    ].map { LureliaReminderAlarmSound(fileName: $0) }
+
+    static var availableSounds: [LureliaReminderAlarmSound] {
+        let nestedSounds = Bundle.main.urls(forResourcesWithExtension: nil, subdirectory: "Sounds") ?? []
+        let rootSounds = Bundle.main.urls(forResourcesWithExtension: nil, subdirectory: nil) ?? []
+        let bundleSounds = (nestedSounds + rootSounds)
+            .filter { ["m4a", "mp3", "wav", "caf", "aiff"].contains($0.pathExtension.lowercased()) }
+            .map { LureliaReminderAlarmSound(fileName: $0.lastPathComponent) }
+            .reduce(into: [String: LureliaReminderAlarmSound]()) { soundsByName, sound in
+                soundsByName[sound.fileName] = sound
+            }
+            .values
+            .sorted { $0.displayName < $1.displayName }
+
+        return bundleSounds.isEmpty ? fallbackSounds : bundleSounds
+    }
+
+    static var defaultSound: LureliaReminderAlarmSound {
+        sound(named: "radiate.m4a")
+    }
+
+    static func sound(named fileName: String) -> LureliaReminderAlarmSound {
+        availableSounds.first { $0.fileName == fileName }
+            ?? fallbackSounds.first { $0.fileName == fileName }
+            ?? fallbackSounds[0]
+    }
+
+    var bundleURL: URL? {
+        let resourceName = URL(fileURLWithPath: fileName).deletingPathExtension().lastPathComponent
+        let resourceExtension = URL(fileURLWithPath: fileName).pathExtension
+
+        return Bundle.main.url(forResource: resourceName, withExtension: resourceExtension)
+            ?? Bundle.main.url(forResource: resourceName, withExtension: resourceExtension, subdirectory: "Sounds")
+    }
+}
+
+struct LureliaReminderAlarmConfigSheet: View {
+    @Environment(\.dismiss) private var dismiss
+
+    @Binding var alarmEnabled: Bool
+    let availableFireTimes: [String]
+    @Binding var selectedFireTimes: Set<String>
+    @Binding var alarmSoundName: String
+    var fireTimesTitle: String = "Reminder Times"
+    var fireTimeSubtitle: String = "Alarm at this reminder time."
+    /// Optional accent tint. `nil` keeps the previous cyan/purple gradient
+    /// look used by the Reminders flow; when set (e.g. by the Habits form
+    /// sheet's frosty white), every gradient accent is replaced by this tint.
+    var tint: Color? = nil
+
+    @State private var previewPlayer: AVAudioPlayer?
+    @State private var previewingSoundName: String?
+
+    private var accentStyle: AnyShapeStyle {
+        if let tint { return AnyShapeStyle(tint) }
+        return AnyShapeStyle(LColors.neutralPearl.opacity(0.82))
+    }
+
+    private var toggleTint: Color {
+        tint ?? LColors.neutralPearl.opacity(0.72)
+    }
+
+    private var selectedBackgroundStyle: AnyShapeStyle {
+        if let tint { return AnyShapeStyle(tint.opacity(0.16)) }
+        return AnyShapeStyle(LColors.neutralGlassHighlight.opacity(0.12))
+    }
+
+    private var accentFillStyle: AnyShapeStyle {
+        if let tint { return AnyShapeStyle(tint) }
+        return AnyShapeStyle(LColors.glassSurface2)
+    }
+
+    private var accentTextColor: Color {
+        tint?.wcagContrastingSolidTextColor ?? LColors.textPrimary
+    }
+
+    private var sounds: [LureliaReminderAlarmSound] {
+        LureliaReminderAlarmSound.availableSounds
+    }
+
+    private var selectedCountText: String {
+        let count = selectedFireTimes.intersection(Set(availableFireTimes)).count
+        return count == 1 ? "1 alarm time" : "\(count) alarm times"
+    }
+
+    var body: some View {
+        NavigationStack {
+            ZStack {
+                LureliaBackgroundAlt()
+
+                ScrollView(showsIndicators: false) {
+                    VStack(spacing: 20) {
+                        alarmHeader
+
+                        alarmCard(fireTimesTitle) {
+                            VStack(spacing: 10) {
+                                ForEach(availableFireTimes, id: \.self) { fireTime in
+                                    Toggle(isOn: selectedBinding(for: fireTime)) {
+                                        VStack(alignment: .leading, spacing: 3) {
+                                            Text(displayTime(fireTime))
+                                                .font(.system(size: 14, weight: .black, design: .rounded))
+                                                .foregroundStyle(LColors.textPrimary)
+
+                                            Text(fireTimeSubtitle)
+                                                .font(.system(size: 12, design: .rounded))
+                                                .foregroundStyle(LColors.textSecondary.opacity(0.78))
+                                        }
+                                    }
+                                    .tint(toggleTint)
+                                    .padding(.horizontal, 12)
+                                    .padding(.vertical, 11)
+                                    .background(LColors.glassSurface2, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+                                }
+                            }
+                        }
+
+                        alarmCard("Sound") {
+                            VStack(spacing: 10) {
+                                ForEach(sounds) { sound in
+                                    HStack(spacing: 12) {
+                                        Button {
+                                            alarmSoundName = sound.fileName
+                                        } label: {
+                                            HStack(spacing: 12) {
+                                                Image(systemName: alarmSoundName == sound.fileName ? "checkmark.circle.fill" : "waveform.circle")
+                                                    .font(.system(size: 18, weight: .bold))
+                                                    .foregroundStyle(alarmSoundName == sound.fileName ? accentStyle : AnyShapeStyle(LColors.textSecondary))
+
+                                                Text(sound.displayName)
+                                                    .font(.system(size: 14, weight: .bold, design: .rounded))
+                                                    .foregroundStyle(LColors.textPrimary)
+
+                                                Spacer()
+                                            }
+                                            .contentShape(Rectangle())
+                                        }
+                                        .frame(maxWidth: .infinity, alignment: .leading)
+                                        .buttonStyle(.plain)
+
+                                        Button {
+                                            toggleSoundPreview(sound)
+                                        } label: {
+                                            Image(previewingSoundName == sound.fileName ? "stopwavy" : "playwavy")
+                                                .renderingMode(.template)
+                                                .resizable()
+                                                .scaledToFit()
+                                                .foregroundStyle(accentTextColor)
+                                                .frame(width: 14, height: 14)
+                                                .frame(width: 34, height: 34)
+                                                .background(accentFillStyle, in: Circle())
+                                                .contentShape(Circle())
+                                        }
+                                        .buttonStyle(.plain)
+                                        .accessibilityLabel(previewingSoundName == sound.fileName ? "Stop preview" : "Preview \(sound.displayName)")
+                                    }
+                                    .padding(.horizontal, 12)
+                                    .padding(.vertical, 11)
+                                    .background(
+                                        alarmSoundName == sound.fileName
+                                        ? selectedBackgroundStyle
+                                        : AnyShapeStyle(LColors.glassSurface2),
+                                        in: RoundedRectangle(cornerRadius: 14, style: .continuous)
+                                    )
+                                    .overlay(
+                                        RoundedRectangle(cornerRadius: 14, style: .continuous)
+                                            .strokeBorder(
+                                                alarmSoundName == sound.fileName
+                                                ? accentStyle
+                                                : AnyShapeStyle(Color.white.opacity(0.08)),
+                                                lineWidth: 1
+                                            )
+                                    )
+                                }
+                            }
+                        }
+                    }
+                    .padding(.horizontal, 20)
+                    .padding(.top, 18)
+                    .padding(.bottom, 36)
+                }
+            }
+            .navigationTitle("Alarm")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbarBackground(.hidden, for: .navigationBar)
+            .onDisappear {
+                stopSoundPreview()
+            }
+            .onAppear {
+                if alarmEnabled && selectedFireTimes.intersection(Set(availableFireTimes)).isEmpty,
+                   let firstFireTime = availableFireTimes.first {
+                    selectedFireTimes = [firstFireTime]
+                }
+            }
+            .toolbar {
+                ToolbarItem(placement: .topBarLeading) {
+                    Button {
+                        alarmEnabled = false
+                        dismiss()
+                    } label: {
+                        Text("Off")
+                            .font(.system(size: 13, weight: .black, design: .rounded))
+                            .foregroundStyle(LColors.textPrimary)
+                            .frame(width: 58, height: 34)
+                            .background(LColors.glassSurface, in: Capsule())
+                    }
+                    .buttonStyle(.plain)
+                }
+
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button {
+                        dismiss()
+                    } label: {
+                        Text("Done")
+                            .font(.system(size: 13, weight: .black, design: .rounded))
+                            .foregroundStyle(accentTextColor)
+                            .frame(width: 68, height: 34)
+                            .background(accentFillStyle, in: Capsule())
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+        }
+    }
+
+    private var alarmHeader: some View {
+        HStack(spacing: 14) {
+            Image(systemName: "alarm.fill")
+                .font(.system(size: 24, weight: .bold))
+                .foregroundStyle(LColors.textSecondary)
+                .frame(width: 54, height: 54)
+                .background(LColors.glassSurface2, in: Circle())
+                .overlay(Circle().strokeBorder(LColors.glassBorder.opacity(0.32), lineWidth: 1))
+
+            VStack(alignment: .leading, spacing: 5) {
+                Text(selectedCountText)
+                    .font(.system(size: 18, weight: .black, design: .rounded))
+                    .foregroundStyle(LColors.textPrimary)
+
+                Text(LureliaReminderAlarmSound.sound(named: alarmSoundName).displayName)
+                    .font(.system(size: 12, weight: .semibold, design: .rounded))
+                    .foregroundStyle(LColors.textSecondary)
+            }
+
+            Spacer()
+        }
+        .padding(18)
+        .background(LColors.glassSurface2, in: RoundedRectangle(cornerRadius: 22, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: 22, style: .continuous)
+                .strokeBorder(LColors.glassBorder.opacity(0.32), lineWidth: 1)
+        )
+    }
+
+    private func selectedBinding(for fireTime: String) -> Binding<Bool> {
+        Binding(
+            get: { selectedFireTimes.contains(fireTime) },
+            set: { isSelected in
+                if isSelected {
+                    selectedFireTimes.insert(fireTime)
+                } else {
+                    selectedFireTimes.remove(fireTime)
+                }
+            }
+        )
+    }
+
+    private func displayTime(_ fireTime: String) -> String {
+        let formatter = DateFormatter()
+        formatter.dateFormat = "HH:mm"
+        let outputFormatter = DateFormatter()
+        outputFormatter.timeStyle = .short
+
+        guard let date = formatter.date(from: fireTime) else { return fireTime }
+        return outputFormatter.string(from: date)
+    }
+
+    private func toggleSoundPreview(_ sound: LureliaReminderAlarmSound) {
+        if previewingSoundName == sound.fileName {
+            stopSoundPreview()
+            return
+        }
+
+        stopSoundPreview()
+
+        guard let soundURL = sound.bundleURL else {
+            print("⚠️ [Lurelia] Missing alarm preview sound: \(sound.fileName)")
+            return
+        }
+
+        do {
+            previewPlayer = try AVAudioPlayer(contentsOf: soundURL)
+            previewPlayer?.prepareToPlay()
+            previewPlayer?.play()
+            previewingSoundName = sound.fileName
+        } catch {
+            print("⚠️ [Lurelia] Could not preview alarm sound \(sound.fileName): \(error)")
+        }
+    }
+
+    private func stopSoundPreview() {
+        previewPlayer?.stop()
+        previewPlayer = nil
+        previewingSoundName = nil
+    }
+
+    private func alarmCard<Content: View>(
+        _ title: String,
+        @ViewBuilder content: () -> Content
+    ) -> some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text(title)
+                .font(.system(size: 13, weight: .bold, design: .rounded))
+                .foregroundStyle(LColors.textSecondary)
+
+            content()
+                .padding(14)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .background(LColors.glassSurface, in: RoundedRectangle(cornerRadius: 18))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 18)
+                        .strokeBorder(cardBorderStyle, lineWidth: 1.1)
+                )
+        }
+    }
+
+    /// The border a section card uses — the habit tint when set, otherwise
+    /// Lurelia's neutral glass border.
+    private var cardBorderStyle: AnyShapeStyle {
+        if let tint {
+            return AnyShapeStyle(tint.opacity(0.78))
+        }
+        return AnyShapeStyle(LColors.glassBorder)
     }
 }
 

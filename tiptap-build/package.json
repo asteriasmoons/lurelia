@@ -1,0 +1,26 @@
+{
+  "name": "lurelia-tiptap-bundle",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Vendored Tiptap runtime for the Lurelia host post editor. Lives OUTSIDE the Xcode project's Resources/ tree so folder references don't sweep it into the app bundle. Output goes to Lurelia/Resources/TiptapEditor/tiptap.bundle.js, which is what Xcode ships.",
+  "type": "module",
+  "scripts": {
+    "build": "node esbuild.mjs",
+    "watch": "node esbuild.mjs --watch"
+  },
+  "dependencies": {
+    "@tiptap/core": "2.5.0",
+    "@tiptap/starter-kit": "2.5.0",
+    "@tiptap/extension-image": "2.5.0",
+    "@tiptap/extension-link": "2.5.0",
+    "@tiptap/extension-underline": "2.5.0",
+    "@tiptap/extension-placeholder": "2.5.0",
+    "tiptap-markdown": "0.8.10"
+  },
+  "devDependencies": {
+    "esbuild": "0.21.5"
+  },
+  "allowScripts": {
+    "esbuild@0.21.5": true
+  }
+}

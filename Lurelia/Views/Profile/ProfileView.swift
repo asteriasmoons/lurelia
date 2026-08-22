@@ -12,12 +12,17 @@ struct ProfileView: View {
     @Environment(\.modelContext) private var modelContext
     
     @Query private var settings: [UserSettings]
+    @Query(sort: \KanbanBoard.sortOrder) private var boards: [KanbanBoard]
     
     @State private var selectedPhotoItem: PhotosPickerItem?
     @State private var showPhotoSourceDialog = false
     @State private var showCamera = false
     @State private var showPhotoPicker = false
     @State private var showOnboardingResetConfirmation = false
+    @State private var showTimelineBoardDropdown = false
+    @State private var isUploadingProfileImage = false
+    @State private var profileImageUploadError: String?
+    @State private var hasAttemptedProfileImageUpload = false
     
     private var userSettings: UserSettings? {
         settings.first
@@ -47,6 +52,9 @@ struct ProfileView: View {
                     // MARK: - Profile Card
                     
                     profileCard
+                        .padding(.horizontal, 24)
+
+                    timelineSettingsCard
                         .padding(.horizontal, 24)
 
                     devControlsCard
@@ -88,6 +96,9 @@ struct ProfileView: View {
                     saveProfileImage(image)
                 }
             }
+        }
+        .task {
+            await uploadExistingProfileAvatarIfNeeded()
         }
     }
 
@@ -140,7 +151,7 @@ struct ProfileView: View {
                             Text("Choose From Gallery")
                                 .font(.system(size: 15, weight: .bold, design: .rounded))
                         }
-                        .foregroundStyle(.white)
+                        .foregroundStyle(Color.white.adaptivePrimaryText)
                         .frame(maxWidth: .infinity)
                         .frame(height: 50)
                         .background(
@@ -205,8 +216,8 @@ struct ProfileView: View {
                     .strokeBorder(
                         LinearGradient(
                             colors: [
-                                LColors.gradientBlue.opacity(0.42),
-                                LColors.gradientPurple.opacity(0.42)
+                                Color.white.opacity(0.85).opacity(0.42),
+                                Color.white.opacity(0.85).opacity(0.42)
                             ],
                             startPoint: .topLeading,
                             endPoint: .bottomTrailing
@@ -309,7 +320,7 @@ struct ProfileView: View {
                         LinearGradient(
                             colors: [
                                 Color.red.opacity(0.42),
-                                LColors.gradientPurple.opacity(0.32)
+                                Color.white.opacity(0.85).opacity(0.32)
                             ],
                             startPoint: .topLeading,
                             endPoint: .bottomTrailing
@@ -337,8 +348,99 @@ struct ProfileView: View {
         }
         
         userSettings.profileImageData = data
+        if userSettings.remoteUserID.isEmpty {
+            userSettings.remoteUserID = "u-\(UUID().uuidString.lowercased())"
+        }
         
         try? modelContext.save()
+
+        Task {
+            await uploadProfileAvatar(data, for: userSettings)
+        }
+    }
+
+    private func uploadProfileAvatar(_ data: Data, for userSettings: UserSettings) async {
+        guard !userSettings.remoteUserID.isEmpty else { return }
+        isUploadingProfileImage = true
+        defer { isUploadingProfileImage = false }
+
+        do {
+            let avatarURL = try await uploadProfileAvatarData(
+                data,
+                userID: userSettings.remoteUserID,
+            )
+            userSettings.remoteAvatarURL = avatarURL
+            userSettings.updatedAt = Date()
+            try? modelContext.save()
+            profileImageUploadError = nil
+        } catch {
+            profileImageUploadError = String(describing: error)
+        }
+    }
+
+    private func uploadExistingProfileAvatarIfNeeded() async {
+        guard !hasAttemptedProfileImageUpload else { return }
+        hasAttemptedProfileImageUpload = true
+
+        guard let userSettings,
+              userSettings.remoteAvatarURL?.isEmpty != false,
+              let data = userSettings.profileImageData else {
+            return
+        }
+
+        if userSettings.remoteUserID.isEmpty {
+            userSettings.remoteUserID = "u-\(UUID().uuidString.lowercased())"
+            try? modelContext.save()
+        }
+
+        await uploadProfileAvatar(data, for: userSettings)
+    }
+
+    private func uploadProfileAvatarData(_ data: Data, userID: String) async throws -> String {
+        var request = URLRequest(url: LureliaAPIConfig.route("/media/profile-avatar"))
+        request.httpMethod = "POST"
+
+        let boundary = "Boundary-\(UUID().uuidString)"
+        request.setValue(
+            "multipart/form-data; boundary=\(boundary)",
+            forHTTPHeaderField: "Content-Type",
+        )
+
+        var body = Data()
+        func appendField(name: String, value: String) {
+            body.append("--\(boundary)\r\n".data(using: .utf8)!)
+            body.append(
+                "Content-Disposition: form-data; name=\"\(name)\"\r\n\r\n"
+                    .data(using: .utf8)!,
+            )
+            body.append("\(value)\r\n".data(using: .utf8)!)
+        }
+
+        body.append("--\(boundary)\r\n".data(using: .utf8)!)
+        body.append(
+            "Content-Disposition: form-data; name=\"avatar\"; filename=\"profile.jpg\"\r\n"
+                .data(using: .utf8)!,
+        )
+        body.append("Content-Type: image/jpeg\r\n\r\n".data(using: .utf8)!)
+        body.append(data)
+        body.append("\r\n".data(using: .utf8)!)
+        appendField(name: "uploaderUserID", value: userID)
+        body.append("--\(boundary)--\r\n".data(using: .utf8)!)
+        request.httpBody = body
+
+        let (responseData, response) = try await URLSession.shared.data(for: request)
+        guard let http = response as? HTTPURLResponse else {
+            throw ProfileAvatarUploadError.badResponse
+        }
+        guard (200..<300).contains(http.statusCode) else {
+            let message = (try? JSONSerialization.jsonObject(with: responseData))
+                .flatMap { ($0 as? [String: Any])?["error"] as? String }
+                ?? "HTTP \(http.statusCode)"
+            throw ProfileAvatarUploadError.serverError(message)
+        }
+
+        let decoded = try JSONDecoder().decode(ProfileAvatarUploadResponse.self, from: responseData)
+        return decoded.avatarURL
     }
 
     private var profileCard: some View {
@@ -353,8 +455,8 @@ struct ProfileView: View {
                     .fill(
                         LinearGradient(
                             colors: [
-                                LColors.gradientBlue.opacity(0.18),
-                                LColors.gradientPurple.opacity(0.22)
+                                Color.white.opacity(0.85).opacity(0.18),
+                                Color.white.opacity(0.85).opacity(0.22)
                             ],
                             startPoint: .topLeading,
                             endPoint: .bottomTrailing
@@ -366,8 +468,8 @@ struct ProfileView: View {
                     .strokeBorder(
                         LinearGradient(
                             colors: [
-                                LColors.gradientBlue.opacity(0.65),
-                                LColors.gradientPurple.opacity(0.65)
+                                Color.white.opacity(0.85).opacity(0.65),
+                                Color.white.opacity(0.85).opacity(0.65)
                             ],
                             startPoint: .topLeading,
                             endPoint: .bottomTrailing
@@ -388,7 +490,7 @@ struct ProfileView: View {
                             .resizable()
                             .scaledToFit()
                             .frame(width: 38, height: 38)
-                            .foregroundStyle(.white)
+                            .foregroundStyle(Color.white.adaptivePrimaryText)
                             .padding(18)
                             .background(
                                 Circle()
@@ -410,7 +512,7 @@ struct ProfileView: View {
                         } label: {
                             Image(systemName: "camera.fill")
                                 .font(.system(size: 12, weight: .bold))
-                                .foregroundStyle(.white)
+                                .foregroundStyle(Color.white.adaptivePrimaryText)
                                 .frame(width: 28, height: 28)
                                 .background(LGradients.header, in: Circle())
                         }
@@ -422,6 +524,171 @@ struct ProfileView: View {
             }
             .frame(maxWidth: .infinity)
         }
+    }
+
+    private var timelineSettingsCard: some View {
+        profileSectionCard(
+            title: "Timeline Settings",
+            icon: "calendar"
+        ) {
+            VStack(alignment: .leading, spacing: 12) {
+                Text("Default timeline board")
+                    .font(.system(size: 13, weight: .bold, design: .rounded))
+                    .foregroundStyle(.white.opacity(0.58))
+                    .textCase(.uppercase)
+                    .tracking(0.7)
+
+                Button {
+                    guard !boards.isEmpty else { return }
+
+                    withAnimation(.spring(response: 0.28, dampingFraction: 0.84)) {
+                        showTimelineBoardDropdown.toggle()
+                    }
+                } label: {
+                    HStack(spacing: 12) {
+                        ZStack {
+                            Circle()
+                                .fill(defaultTimelineBoardAccent.opacity(0.16))
+                                .frame(width: 38, height: 38)
+
+                            iconView(defaultTimelineBoard?.icon ?? "starcal", size: 18)
+                                .foregroundStyle(defaultTimelineBoardAccent)
+                        }
+
+                        VStack(alignment: .leading, spacing: 3) {
+                            Text(defaultTimelineBoard?.name ?? (boards.isEmpty ? "No boards yet" : "Choose a board"))
+                                .font(.system(size: 15, weight: .black, design: .rounded))
+                                .foregroundStyle(.white)
+                                .lineLimit(1)
+
+                            Text("Used when Kanban Timeline opens")
+                                .font(.system(size: 12, weight: .semibold, design: .rounded))
+                                .foregroundStyle(.white.opacity(0.48))
+                                .lineLimit(1)
+                        }
+
+                        Spacer()
+
+                        Image(showTimelineBoardDropdown ? "chevdown" : "chevright")
+                            .renderingMode(.template)
+                            .resizable()
+                            .scaledToFit()
+                            .frame(width: 16, height: 16)
+                            .foregroundStyle(LGradients.header)
+                            .rotationEffect(.degrees(showTimelineBoardDropdown ? 180 : 0))
+                    }
+                    .padding(.horizontal, 12)
+                    .frame(height: 62)
+                    .background(
+                        RoundedRectangle(cornerRadius: 18, style: .continuous)
+                            .fill(LColors.glassSurface)
+                    )
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 18, style: .continuous)
+                            .strokeBorder(LColors.glassBorder, lineWidth: 1)
+                    )
+                }
+                .buttonStyle(.plain)
+                .disabled(boards.isEmpty)
+                .opacity(boards.isEmpty ? 0.58 : 1)
+
+                if showTimelineBoardDropdown {
+                    VStack(spacing: 6) {
+                        ForEach(boards) { board in
+                            timelineBoardOption(board)
+                        }
+                    }
+                    .padding(.top, 2)
+                    .transition(.move(edge: .top).combined(with: .opacity))
+                }
+            }
+        }
+    }
+
+    private var defaultTimelineBoard: KanbanBoard? {
+        guard let boardID = userSettings?.defaultTimelineBoardID else {
+            return boards.first
+        }
+
+        return boards.first { $0.id == boardID } ?? boards.first
+    }
+
+    private var defaultTimelineBoardAccent: Color {
+        Color(lureliaHex: defaultTimelineBoard?.colorHex ?? "#03dbfc")
+    }
+
+    private func timelineBoardOption(_ board: KanbanBoard) -> some View {
+        Button {
+            setDefaultTimelineBoard(board)
+        } label: {
+            HStack(spacing: 10) {
+                ZStack {
+                    Circle()
+                        .fill(Color(lureliaHex: board.colorHex).opacity(0.14))
+                        .frame(width: 32, height: 32)
+
+                    iconView(board.icon, size: 15)
+                        .foregroundStyle(Color(lureliaHex: board.colorHex))
+                }
+
+                Text(board.name)
+                    .font(.system(size: 14, weight: .bold, design: .rounded))
+                    .foregroundStyle(.white.opacity(0.9))
+                    .lineLimit(1)
+
+                Spacer()
+
+                if isDefaultTimelineBoard(board) {
+                    Image("checkwavy")
+                        .renderingMode(.template)
+                        .resizable()
+                        .scaledToFit()
+                        .frame(width: 15, height: 15)
+                        .foregroundStyle(LGradients.header)
+                }
+            }
+            .padding(.horizontal, 12)
+            .frame(height: 48)
+            .background(
+                RoundedRectangle(cornerRadius: 15, style: .continuous)
+                    .fill(isDefaultTimelineBoard(board) ? Color.white.opacity(0.09) : Color.white.opacity(0.045))
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: 15, style: .continuous)
+                    .strokeBorder(
+                        isDefaultTimelineBoard(board)
+                        ? Color(lureliaHex: board.colorHex).opacity(0.45)
+                        : Color.white.opacity(0.06),
+                        lineWidth: 1
+                    )
+            )
+        }
+        .buttonStyle(.plain)
+    }
+
+    private func isDefaultTimelineBoard(_ board: KanbanBoard) -> Bool {
+        defaultTimelineBoard?.id == board.id
+    }
+
+    private func setDefaultTimelineBoard(_ board: KanbanBoard) {
+        let settings = resolvedUserSettings()
+        settings.defaultTimelineBoardID = board.id
+
+        try? modelContext.save()
+
+        withAnimation(.spring(response: 0.26, dampingFraction: 0.86)) {
+            showTimelineBoardDropdown = false
+        }
+    }
+
+    private func resolvedUserSettings() -> UserSettings {
+        if let existing = settings.first {
+            return existing
+        }
+
+        let created = UserSettings()
+        modelContext.insert(created)
+        return created
     }
 
     private var devControlsCard: some View {
@@ -483,8 +750,8 @@ struct ProfileView: View {
                                     .strokeBorder(
                                         LinearGradient(
                                             colors: [
-                                                LColors.gradientBlue.opacity(0.72),
-                                                LColors.gradientPurple.opacity(0.72),
+                                                Color.white.opacity(0.85).opacity(0.72),
+                                                Color.white.opacity(0.85).opacity(0.72),
                                                 Color.white.opacity(0.34)
                                             ],
                                             startPoint: .topLeading,
@@ -521,6 +788,16 @@ struct ProfileView: View {
         }
         .frame(width: size, height: size)
     }
+}
+
+private struct ProfileAvatarUploadResponse: Decodable {
+    let success: Bool
+    let avatarURL: String
+}
+
+private enum ProfileAvatarUploadError: Error {
+    case badResponse
+    case serverError(String)
 }
 
 

@@ -313,7 +313,7 @@ struct ChallengesView: View {
                 } label: {
                     Text("Create Challenge")
                         .font(.system(size: 13, weight: .black, design: .rounded))
-                        .foregroundStyle(.white)
+                        .foregroundStyle(Color.white.adaptivePrimaryText)
                         .frame(maxWidth: .infinity)
                         .padding(.vertical, 12)
                         .background(LGradients.header, in: Capsule())

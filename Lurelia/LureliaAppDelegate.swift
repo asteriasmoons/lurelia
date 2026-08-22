@@ -20,6 +20,37 @@ class LureliaAppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCen
         return true
     }
 
+    // MARK: - APNs (shared event platform, Phase 1A.7)
+
+    func application(
+        _ application: UIApplication,
+        didRegisterForRemoteNotificationsWithDeviceToken deviceToken: Data,
+    ) {
+        Task { @MainActor in
+            SharedEventNotificationManager.shared.receivedDeviceToken(deviceToken)
+        }
+    }
+
+    func application(
+        _ application: UIApplication,
+        didFailToRegisterForRemoteNotificationsWithError error: Error,
+    ) {
+        Task { @MainActor in
+            SharedEventNotificationManager.shared.registrationFailed(error)
+        }
+    }
+
+    func application(
+        _ application: UIApplication,
+        didReceiveRemoteNotification userInfo: [AnyHashable: Any],
+        fetchCompletionHandler completionHandler: @escaping (UIBackgroundFetchResult) -> Void,
+    ) {
+        Task { @MainActor in
+            SharedEventNotificationManager.shared.presentForeground(userInfo: userInfo)
+            completionHandler(.newData)
+        }
+    }
+
     func userNotificationCenter(
         _ center: UNUserNotificationCenter,
         willPresent notification: UNNotification,

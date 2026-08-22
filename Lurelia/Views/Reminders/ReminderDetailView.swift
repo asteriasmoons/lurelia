@@ -67,7 +67,7 @@ struct ReminderDetailView: View {
                                 .resizable()
                                 .scaledToFit()
                                 .frame(width: 28, height: 28)
-                                .foregroundStyle(LGradients.header)
+                                .foregroundStyle(reminder.color)
                         }
                         .buttonStyle(.plain)
                     }
@@ -76,13 +76,13 @@ struct ReminderDetailView: View {
 
                     // MARK: - Icon + Title + Description
 
-                    GlassCard {
+                    GlassCard(tint: reminder.color) {
                         VStack(spacing: 10) {
                             ZStack {
                                 Circle()
                                     .fill(
                                         LinearGradient(
-                                            colors: [LColors.gradientBlue.opacity(0.22), LColors.gradientPurple.opacity(0.20)],
+                                            colors: [Color.white.opacity(0.85).opacity(0.22), Color.white.opacity(0.85).opacity(0.20)],
                                             startPoint: .topLeading,
                                             endPoint: .bottomTrailing
                                         )
@@ -90,11 +90,11 @@ struct ReminderDetailView: View {
                                     .frame(width: 64, height: 64)
 
                                 Circle()
-                                    .strokeBorder(LGradients.header, lineWidth: 1.15)
+                                    .strokeBorder(reminder.color, lineWidth: 1.15)
                                     .frame(width: 64, height: 64)
 
                                 LureliaIconView(iconId: reminderIcon, size: 38)
-                                    .foregroundStyle(LGradients.header)
+                                    .foregroundStyle(reminder.color)
                             }
 
                             Text(reminder.title)
@@ -114,23 +114,9 @@ struct ReminderDetailView: View {
                     }
                     .padding(.horizontal, 24)
 
-                    // MARK: - Motivation
-
-                    if let motivation = reminder.motivation, !motivation.isEmpty {
-                        sectionCard(title: "Motivation", icon: "sparkle") {
-                            sectionLabel("What makes this reminder worth doing?")
-                            sectionBody(motivation)
-                        }
-                    }
-
-                    // MARK: - Consequences
-
-                    if let consequences = reminder.consequences, !consequences.isEmpty {
-                        sectionCard(title: "Consequences", icon: "minuswavy") {
-                            sectionLabel("What happens if this gets skipped or ignored?")
-                            sectionBody(consequences)
-                        }
-                    }
+                    // Motivation / Consequences hidden from the detail view.
+                    // The underlying model fields are still populated so this
+                    // is a visual-only removal.
 
                     // MARK: - Schedule
 
@@ -141,6 +127,8 @@ struct ReminderDetailView: View {
                             scheduleInfoTile(label: "Frequency", value: repeatSummary)
 
                             scheduleInfoTile(label: "Next Occurrence", value: nextOccurrenceText)
+
+                            scheduleInfoTile(label: "Alarm", value: alarmSummary)
                         }
                     }
                     
@@ -153,7 +141,7 @@ struct ReminderDetailView: View {
                                     .renderingMode(.template)
                                     .resizable().scaledToFit()
                                     .frame(width: 20, height: 20)
-                                    .foregroundStyle(LGradients.header)
+                                    .foregroundStyle(reminder.color)
                                 Text("Streaks")
                                     .font(.system(size: 18, weight: .bold, design: .rounded))
                                     .foregroundStyle(.white)
@@ -179,7 +167,7 @@ struct ReminderDetailView: View {
                                     .renderingMode(.template)
                                     .resizable().scaledToFit()
                                     .frame(width: 20, height: 20)
-                                    .foregroundStyle(LGradients.header)
+                                    .foregroundStyle(reminder.color)
                                 Text("Status & Time")
                                     .font(.system(size: 18, weight: .bold, design: .rounded))
                                     .foregroundStyle(.white)
@@ -193,20 +181,11 @@ struct ReminderDetailView: View {
                         .padding(.horizontal, 24)
                     }
 
-                    // MARK: - Recovery Plan
+                    // Recovery Plan and Tiny Nudge hidden from the detail
+                    // view. The model fields and TinyNudge state remain so
+                    // this is a visual-only removal.
 
-                    if let recoveryPlan = reminder.recoveryPlan, !recoveryPlan.isEmpty {
-                        sectionCard(title: "Recovery Plan", icon: "bandaidheart") {
-                            sectionLabel("How do I recover if this does not go as planned?")
-                            sectionBody(recoveryPlan)
-                        }
-                    }
-                    // MARK: - Friction
 
-                    sectionCard(title: "Tiny Nudge", icon: "starchat") {
-                        frictionBox
-                    }
-                    
                     // MARK: - Completion Steps (Checklist)
 
                     if reminder.hasChecklist {
@@ -219,13 +198,13 @@ struct ReminderDetailView: View {
                                     Spacer()
                                     Text("\(Int(reminder.checklistProgress * 100))%")
                                         .font(.system(size: 12, weight: .bold, design: .rounded))
-                                        .foregroundStyle(.white)
+                                        .foregroundStyle(Color.white.adaptivePrimaryText)
                                 }
 
                                 GeometryReader { geo in
                                     ZStack(alignment: .leading) {
                                         RoundedRectangle(cornerRadius: 4).fill(.white.opacity(0.1)).frame(height: 6)
-                                        RoundedRectangle(cornerRadius: 4).fill(LGradients.header)
+                                        RoundedRectangle(cornerRadius: 4).fill(reminder.color)
                                             .frame(width: geo.size.width * reminder.checklistProgress, height: 6)
                                     }
                                 }
@@ -238,12 +217,12 @@ struct ReminderDetailView: View {
                                         HStack(spacing: 10) {
                                             ZStack {
                                                 Circle()
-                                                    .fill(item.isCompleted ? AnyShapeStyle(LGradients.header) : AnyShapeStyle(Color.clear))
+                                                    .fill(item.isCompleted ? AnyShapeStyle(reminder.color) : AnyShapeStyle(Color.clear))
                                                     .frame(width: 18, height: 18)
 
                                                 Circle()
                                                     .strokeBorder(
-                                                        item.isCompleted ? AnyShapeStyle(Color.clear) : AnyShapeStyle(LGradients.header),
+                                                        item.isCompleted ? AnyShapeStyle(Color.clear) : AnyShapeStyle(reminder.color),
                                                         lineWidth: 1.3
                                                     )
                                                     .frame(width: 18, height: 18)
@@ -354,6 +333,13 @@ struct ReminderDetailView: View {
         return next.formatted(date: .abbreviated, time: .shortened)
     }
 
+    private var alarmSummary: String {
+        guard reminder.alarmEnabled else { return "Disabled" }
+        let count = reminder.alarmFireTimes.filter { !$0.isEmpty }.count
+        if count <= 1 { return "1 time" }
+        return "\(count) times"
+    }
+
     private func schedulePill(label: String, value: String) -> some View {
         HStack {
             Text(label)
@@ -368,12 +354,12 @@ struct ReminderDetailView: View {
 
             Text(value)
                 .font(.system(size: 12, weight: .bold, design: .rounded))
-                .foregroundStyle(LColors.gradientPurple.opacity(0.85))
+                .foregroundStyle(.white)
                 .padding(.horizontal, 12)
                 .padding(.vertical, 7)
-                .background(LColors.gradientPurple.opacity(0.1))
+                .background(reminder.color.opacity(0.22))
                 .clipShape(Capsule())
-                .overlay(Capsule().strokeBorder(LColors.gradientPurple.opacity(0.18), lineWidth: 1))
+                .overlay(Capsule().strokeBorder(reminder.color.opacity(0.55), lineWidth: 1))
         }
     }
     
@@ -443,7 +429,7 @@ struct ReminderDetailView: View {
     }
 
     private func statusCard(_ status: ReminderStatus) -> some View {
-        GlassCard {
+        GlassCard(tint: reminder.color) {
             VStack(alignment: .leading, spacing: 6) {
                 Text("STATUS")
                     .font(.system(size: 8, weight: .black, design: .rounded))
@@ -462,7 +448,7 @@ struct ReminderDetailView: View {
         let next = reminder.nextFireAt ?? reminder.scheduledDate
         let diff = next.timeIntervalSince(now)
 
-        return GlassCard {
+        return GlassCard(tint: reminder.color) {
             VStack(alignment: .leading, spacing: 6) {
                 Text("TIME")
                     .font(.system(size: 8, weight: .black, design: .rounded))
@@ -496,7 +482,7 @@ struct ReminderDetailView: View {
 
     @ViewBuilder
     private var locationSection: some View {
-        sectionCard(title: "Location", icon: "starlocation") {
+        sectionCard(title: "Location", icon: "starpinlocation") {
             VStack(alignment: .leading, spacing: 12) {
                 HStack(spacing: 8) {
                     VStack(alignment: .leading, spacing: 4) {
@@ -530,10 +516,10 @@ struct ReminderDetailView: View {
                             Text("Open in Maps")
                                 .font(.system(size: 14, weight: .bold, design: .rounded))
                         }
-                        .foregroundStyle(.white)
+                        .foregroundStyle(reminder.color.adaptivePrimaryText)
                         .frame(maxWidth: .infinity)
                         .frame(height: 44)
-                        .background(LGradients.header, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+                        .background(reminder.color, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
                     }
                     .buttonStyle(.plain)
                 }
@@ -552,7 +538,7 @@ struct ReminderDetailView: View {
     // MARK: - Streak Card
 
     private func streakCard(label: String, value: String, unit: String) -> some View {
-        GlassCard {
+        GlassCard(tint: reminder.color) {
             VStack(alignment: .leading, spacing: 6) {
                 Text(label.uppercased())
                     .font(.system(size: 10, weight: .semibold, design: .rounded))
@@ -612,7 +598,7 @@ struct ReminderDetailView: View {
                         } label: {
                             Text("Load More")
                                 .font(.system(size: 13, weight: .bold, design: .rounded))
-                                .foregroundStyle(LGradients.header)
+                                .foregroundStyle(reminder.color)
                                 .frame(maxWidth: .infinity)
                                 .padding(.vertical, 10)
                                 .background(.white.opacity(0.06))
@@ -658,12 +644,12 @@ struct ReminderDetailView: View {
         VStack(alignment: .leading, spacing: 10) {
             HStack(spacing: 8) {
                 Image(icon).renderingMode(.template).resizable().scaledToFit()
-                    .frame(width: 20, height: 20).foregroundStyle(LGradients.header)
+                    .frame(width: 20, height: 20).foregroundStyle(reminder.color)
                 Text(title)
                     .font(.system(size: 18, weight: .bold, design: .rounded))
                     .foregroundStyle(.white)
             }
-            GlassCard {
+            GlassCard(tint: reminder.color) {
                 content()
                     .frame(maxWidth: .infinity, alignment: .leading)
             }
@@ -748,12 +734,12 @@ struct ReminderDetailView: View {
                 } label: {
                     Text("Convince Me")
                         .font(.system(size: 15, weight: .black, design: .rounded))
-                        .foregroundStyle(.white)
+                        .foregroundStyle(Color.white.adaptivePrimaryText)
                         .frame(maxWidth: .infinity)
                         .frame(height: 52)
                         .background(
                             RoundedRectangle(cornerRadius: 18, style: .continuous)
-                                .fill(LGradients.header)
+                                .fill(reminder.color)
                         )
                 }
                 .buttonStyle(.plain)
@@ -772,7 +758,7 @@ struct ReminderDetailView: View {
                             .resizable()
                             .scaledToFit()
                             .frame(width: 16, height: 16)
-                            .foregroundStyle(LGradients.header)
+                            .foregroundStyle(reminder.color)
 
                         Text("Add Friction")
                             .font(.system(size: 14, weight: .semibold, design: .rounded))
@@ -925,7 +911,7 @@ struct ReminderDetailView: View {
                 .resizable()
                 .scaledToFit()
                 .frame(width: 18, height: 18)
-                .foregroundStyle(LGradients.header)
+                .foregroundStyle(reminder.color)
 
             Text(level.title)
                 .font(.system(size: 13, weight: .semibold, design: .rounded))

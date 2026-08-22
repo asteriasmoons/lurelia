@@ -1,0 +1,342 @@
+//
+//  RoutineTaskManager.swift
+//  Lurelia
+//
+//  Handles per-task local notifications and AlarmKit alarms for individual
+//  routine tasks (LureliaRoutineTask), plus recording of completion / skip
+//  history that powers each task's statistics.
+//
+//  NOTE: The existing `TaskManager` type manages the standalone daily-task
+//  system (LureliaTask) and is unrelated to routines, so this dedicated
+//  manager keeps routine-task scheduling isolated and non-breaking.
+//
+//  NOTIFICATION IDENTIFIERS
+//  ────────────────────────
+//  Base ID = "lurelia.routinetask.<stableTaskID>"
+//  Each lead-time offset uses a suffix: baseID.0, baseID.1, ...
+//
+
+import Foundation
+import SwiftData
+import SwiftUI
+import Combine
+import UserNotifications
+import ActivityKit
+import AlarmKit
+import WidgetKit
+
+@MainActor
+final class RoutineTaskManager: ObservableObject {
+
+    static let shared = RoutineTaskManager()
+
+    static let categoryID = "LURELIA_ROUTINE_TASK"
+
+    private init() {}
+
+    // MARK: - Identifiers
+
+    private func sanitized(_ stableID: String) -> String {
+        let allowed = CharacterSet.alphanumerics.union(CharacterSet(charactersIn: "-_."))
+        let cleaned = String(stableID.unicodeScalars.map { allowed.contains($0) ? Character($0) : "-" })
+        return cleaned.isEmpty ? UUID().uuidString : cleaned
+    }
+
+    private func notificationBaseID(for task: LureliaRoutineTask) -> String {
+        "lurelia.routinetask.\(sanitized(task.stableTaskID))"
+    }
+
+    // MARK: - Sync
+
+    /// Cancels any existing notifications / alarms for the task and rebuilds
+    /// them from the task's current configuration. Call after editing a task.
+    func sync(task: LureliaRoutineTask) {
+        cancel(task: task)
+
+        guard task.hasDueTime else { return }
+
+        scheduleNotifications(for: task)
+        scheduleAlarmIfNeeded(for: task)
+    }
+
+    // MARK: - Notifications
+
+    private func scheduleNotifications(for task: LureliaRoutineTask) {
+        guard task.notificationsEnabled else { return }
+
+        let leadOffsets = task.notificationLeadMinutes.isEmpty ? [0] : task.notificationLeadMinutes
+        let baseID = notificationBaseID(for: task)
+        let calendar = Calendar.current
+        let now = Date()
+
+        var scheduledIDs: [String] = []
+
+        for (index, lead) in leadOffsets.enumerated() {
+            guard let dueDate = task.nextDueDate(after: now, calendar: calendar) else { continue }
+            let fireDate = calendar.date(byAdding: .minute, value: -max(0, lead), to: dueDate) ?? dueDate
+
+            guard fireDate > now else { continue }
+
+            let content = UNMutableNotificationContent()
+            content.title = task.title
+            let trimmedNotes = task.notes.trimmingCharacters(in: .whitespacesAndNewlines)
+            content.body = trimmedNotes.isEmpty
+                ? (lead > 0 ? "Coming up in \(lead) min" : "Time to start")
+                : trimmedNotes
+            content.sound = .default
+            content.categoryIdentifier = Self.categoryID
+            content.userInfo = [
+                "routineTaskStableID": task.stableTaskID,
+                "routineName": task.routine?.name ?? ""
+            ]
+
+            var comps = calendar.dateComponents([.year, .month, .day, .hour, .minute, .second], from: fireDate)
+            comps.second = comps.second ?? 0
+            let trigger = UNCalendarNotificationTrigger(dateMatching: comps, repeats: false)
+
+            let requestID = "\(baseID).\(index)"
+            let request = UNNotificationRequest(identifier: requestID, content: content, trigger: trigger)
+
+            UNUserNotificationCenter.current().add(request) { error in
+                if let error {
+                    print("❌ [RoutineTaskManager] Failed scheduling notification for '\(task.title)': \(error)")
+                } else {
+                    print("⏰ [RoutineTaskManager] Scheduled '\(task.title)' [\(requestID)] → \(fireDate)")
+                }
+            }
+
+            scheduledIDs.append(requestID)
+        }
+
+        task.notificationIDs = scheduledIDs
+        task.updatedAt = Date()
+    }
+
+    // MARK: - Cancel
+
+    func cancel(task: LureliaRoutineTask) {
+        let baseID = notificationBaseID(for: task)
+        let center = UNUserNotificationCenter.current()
+
+        var ids: [String] = task.notificationIDs
+        ids.append(baseID)
+        for i in 0..<20 { ids.append("\(baseID).\(i)") }
+
+        let uniqueIDs = Array(Set(ids))
+        center.removePendingNotificationRequests(withIdentifiers: uniqueIDs)
+        center.removeDeliveredNotifications(withIdentifiers: uniqueIDs)
+
+        task.notificationIDs = []
+        cancelAlarmIfNeeded(for: task)
+    }
+
+    // MARK: - AlarmKit
+
+    private func scheduleAlarmIfNeeded(for task: LureliaRoutineTask) {
+        guard task.alarmEnabled, task.hasDueTime else { return }
+        guard let alarmDate = task.nextDueDate(after: Date()) else { return }
+
+        let alarmID: UUID
+        if let raw = task.alarmIDString, let existing = UUID(uuidString: raw) {
+            alarmID = existing
+        } else {
+            alarmID = UUID()
+            task.alarmIDString = alarmID.uuidString
+        }
+
+        scheduleAlarm(task: task, alarmID: alarmID, alarmDate: alarmDate)
+    }
+
+    private func scheduleAlarm(
+        task: LureliaRoutineTask,
+        alarmID: UUID,
+        alarmDate: Date
+    ) {
+        Task { @MainActor in
+            guard #available(iOS 26.0, *) else { return }
+
+            do {
+                switch AlarmManager.shared.authorizationState {
+                case .authorized:
+                    break
+                case .notDetermined:
+                    let state = try await AlarmManager.shared.requestAuthorization()
+                    guard state == .authorized else {
+                        print("⚠️ [RoutineTaskManager] Alarm authorization not granted for '\(task.title)'")
+                        return
+                    }
+                case .denied:
+                    print("⚠️ [RoutineTaskManager] Alarm authorization denied for '\(task.title)'")
+                    return
+                @unknown default:
+                    return
+                }
+
+                let alert = AlarmPresentation.Alert(
+                    title: LocalizedStringResource(stringLiteral: task.title)
+                )
+                let metadata = LureliaRoutineTaskAlarmMetadata(
+                    stableTaskID: task.stableTaskID,
+                    routineName: task.routine?.name ?? "",
+                    title: task.title,
+                    icon: task.icon
+                )
+                let attributes = AlarmAttributes(
+                    presentation: AlarmPresentation(alert: alert),
+                    metadata: metadata,
+                    tintColor: LColors.gradientBlue
+                )
+                let soundName = task.alarmSoundName?.trimmingCharacters(in: .whitespacesAndNewlines)
+                let sound: AlertConfiguration.AlertSound = soundName?.isEmpty == false
+                    ? .named(soundName!)
+                    : .default
+                let configuration = AlarmManager.AlarmConfiguration.alarm(
+                    schedule: .fixed(alarmDate),
+                    attributes: attributes,
+                    sound: sound
+                )
+
+                try? AlarmManager.shared.cancel(id: alarmID)
+                try await AlarmManager.shared.schedule(id: alarmID, configuration: configuration)
+                print("✅ [RoutineTaskManager] Scheduled alarm for '\(task.title)' at \(alarmDate)")
+            } catch {
+                print("❌ [RoutineTaskManager] Alarm schedule error for '\(task.title)': \(error)")
+            }
+        }
+    }
+
+    private func cancelAlarmIfNeeded(for task: LureliaRoutineTask) {
+        guard #available(iOS 26.0, *) else { return }
+        guard let raw = task.alarmIDString, let alarmID = UUID(uuidString: raw) else { return }
+
+        do {
+            try AlarmManager.shared.cancel(id: alarmID)
+            print("🧹 [RoutineTaskManager] Cancelled alarm for '\(task.title)'")
+        } catch {
+            print("⚠️ [RoutineTaskManager] Alarm cancel skipped for '\(task.title)': \(error)")
+        }
+    }
+
+    // MARK: - History / Statistics
+
+    /// Records a completion event and saves. The task's *live* state
+    /// (`state`, `completedAt`) is only flipped to "completed" when the
+    /// occurrence being completed is today — completing yesterday's row
+    /// from the Kanban timeline just appends a history entry dated to that
+    /// day and leaves today's instance untouched.
+    func recordCompletion(
+        task: LureliaRoutineTask,
+        durationSeconds: Int = 0,
+        note: String = "",
+        occurredAt: Date = Date(),
+        context: ModelContext
+    ) {
+        let entry = LureliaRoutineTaskHistoryEntry(
+            date: occurredAt,
+            durationSeconds: max(0, durationSeconds),
+            wasCompleted: true,
+            skipReason: "",
+            note: note.trimmingCharacters(in: .whitespacesAndNewlines)
+        )
+        context.insert(entry)
+        entry.task = task
+        if task.historyItems == nil { task.historyItems = [] }
+        task.historyItems?.append(entry)
+
+        if Calendar.current.isDateInToday(occurredAt) {
+            task.markCompleted()
+        } else {
+            // Historical completion — bump updatedAt for sync, but leave
+            // the live state so today's card doesn't flip to completed.
+            task.updatedAt = Date()
+        }
+
+        task.routine?.refreshCurrentContractStatusIfNeeded()
+
+        do {
+            try context.save()
+        } catch {
+            print("🚨 [RoutineTaskManager] recordCompletion SAVE FAILED: \(error)")
+        }
+        WidgetCenter.shared.reloadTimelines(ofKind: "LureliaDueRoutinesWidget")
+    }
+
+    /// Records a skip event and saves. Same rule as `recordCompletion` —
+    /// live `state`/`skippedAt` only mutate when the occurrence is today.
+    func recordSkip(
+        task: LureliaRoutineTask,
+        reason: String = "",
+        occurredAt: Date = Date(),
+        context: ModelContext
+    ) {
+        let entry = LureliaRoutineTaskHistoryEntry(
+            date: occurredAt,
+            durationSeconds: 0,
+            wasCompleted: false,
+            skipReason: reason.trimmingCharacters(in: .whitespacesAndNewlines),
+            note: ""
+        )
+        context.insert(entry)
+        entry.task = task
+        if task.historyItems == nil { task.historyItems = [] }
+        task.historyItems?.append(entry)
+
+        if Calendar.current.isDateInToday(occurredAt) {
+            task.markSkipped()
+        } else {
+            task.updatedAt = Date()
+        }
+
+        task.routine?.refreshCurrentContractStatusIfNeeded()
+
+        do {
+            try context.save()
+        } catch {
+            print("🚨 [RoutineTaskManager] recordSkip SAVE FAILED: \(error)")
+        }
+        WidgetCenter.shared.reloadTimelines(ofKind: "LureliaDueRoutinesWidget")
+    }
+
+    func resetStatus(
+        task: LureliaRoutineTask,
+        on day: Date = Date(),
+        context: ModelContext
+    ) {
+        let calendar = Calendar.current
+        let existingHistory = task.historyItems ?? []
+        let remainingHistory = existingHistory.filter {
+            !calendar.isDate($0.date, inSameDayAs: day)
+        }
+
+        for entry in existingHistory where calendar.isDate(entry.date, inSameDayAs: day) {
+            context.delete(entry)
+        }
+
+        task.historyItems = remainingHistory
+
+        if let completedAt = task.completedAt,
+           calendar.isDate(completedAt, inSameDayAs: day) {
+            task.completedAt = nil
+        }
+
+        if let skippedAt = task.skippedAt,
+           calendar.isDate(skippedAt, inSameDayAs: day) {
+            task.skippedAt = nil
+        }
+
+        if calendar.isDateInToday(day) {
+            task.resetState()
+        } else {
+            task.updatedAt = Date()
+        }
+
+        task.routine?.refreshCurrentContractStatusIfNeeded()
+
+        do {
+            try context.save()
+        } catch {
+            print("🚨 [RoutineTaskManager] resetStatus SAVE FAILED: \(error)")
+        }
+        WidgetCenter.shared.reloadTimelines(ofKind: "LureliaDueRoutinesWidget")
+    }
+}

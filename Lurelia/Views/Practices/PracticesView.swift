@@ -105,7 +105,7 @@ struct PracticesView: View {
             
             Text("No practices yet")
                 .font(.system(size: 18, weight: .bold, design: .rounded))
-                .foregroundStyle(.white)
+                .foregroundStyle(Color.white.adaptivePrimaryText)
             
             Text("A practice is a collection of routines\nthat support the same area of your life.")
                 .font(.system(size: 14, design: .rounded))
@@ -117,7 +117,7 @@ struct PracticesView: View {
             } label: {
                 Text("Create your first practice")
                     .font(.system(size: 14, weight: .bold, design: .rounded))
-                    .foregroundStyle(.white)
+                    .foregroundStyle(Color.white.adaptivePrimaryText)
                     .padding(.horizontal, 20)
                     .padding(.vertical, 12)
                     .background(LGradients.header, in: Capsule())

@@ -108,9 +108,9 @@ struct TimeBlockView: View {
                                     .strokeBorder(
                                         LinearGradient(
                                             colors: [
-                                                LColors.gradientBlue.opacity(0.95),
-                                                LColors.gradientPurple.opacity(0.95),
-                                                Color.white.opacity(0.55)
+                                                Color.white.opacity(0.85).opacity(0.95),
+                                                Color.white.opacity(0.85).opacity(0.95),
+                                                Color.white.opacity(0.85)
                                             ],
                                             startPoint: .topLeading,
                                             endPoint: .bottomTrailing
@@ -157,10 +157,10 @@ struct TimeBlockView: View {
                 Text("\(todaysSlots.count)")
                     .font(.system(size: 13, weight: .black, design: .rounded))
             }
-            .foregroundStyle(.white)
+            .foregroundStyle(LColors.textPrimary)
             .padding(.horizontal, 12)
             .frame(height: 34)
-            .background(Capsule().fill(LGradients.header))
+            .background { LureliaNeutralGlassSurface(cornerRadius: 999) }
         }
     }
 
@@ -490,8 +490,8 @@ private struct TimeBlockReminderCard: View {
                         .fill(
                             LinearGradient(
                                 colors: [
-                                    LColors.gradientBlue.opacity(0.18),
-                                    LColors.gradientPurple.opacity(0.22),
+                                    Color.white.opacity(0.85).opacity(0.18),
+                                    Color.white.opacity(0.85).opacity(0.22),
                                     Color.white.opacity(0.03)
                                 ],
                                 startPoint: .topLeading,
@@ -504,8 +504,8 @@ private struct TimeBlockReminderCard: View {
                         .strokeBorder(
                             LinearGradient(
                                 colors: [
-                                    LColors.gradientBlue.opacity(0.92),
-                                    LColors.gradientPurple.opacity(0.92),
+                                    Color.white.opacity(0.85).opacity(0.92),
+                                    Color.white.opacity(0.85).opacity(0.92),
                                     Color.white.opacity(0.38)
                                 ],
                                 startPoint: .topLeading,
@@ -524,4 +524,3 @@ private struct TimeBlockReminderCard: View {
         TimeBlockView()
     }
 }
-

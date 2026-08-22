@@ -130,7 +130,7 @@ struct JourneyStepDetailView: View {
                                     .renderingMode(.template)
                                     .resizable()
                                     .scaledToFit()
-                                    .foregroundStyle(.white)
+                                    .foregroundStyle(LColors.bg)
                                     .frame(width: 17, height: 17)
                             }
                         }

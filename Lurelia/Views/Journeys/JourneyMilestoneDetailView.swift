@@ -375,7 +375,7 @@ extension JourneyMilestoneDetailView {
                                                 .renderingMode(.template)
                                                 .resizable()
                                                 .scaledToFit()
-                                                .foregroundStyle(.white)
+                                                .foregroundStyle(LColors.bg)
                                                 .frame(width: 14, height: 14)
                                         }
                                     }

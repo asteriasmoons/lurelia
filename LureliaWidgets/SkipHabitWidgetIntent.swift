@@ -22,7 +22,11 @@ struct SkipHabitWidgetIntent: AppIntent {
     }
 
     func perform() async throws -> some IntentResult {
+        print("🟣 [WidgetIntent] SkipHabit perform — habitID=\(habitID)")
+        defer { reloadHabitWidgets() }
+
         guard let id = UUID(uuidString: habitID) else {
+            print("🟣 [WidgetIntent] SkipHabit — invalid UUID, bailing")
             return .result()
         }
 
@@ -39,32 +43,41 @@ struct SkipHabitWidgetIntent: AppIntent {
             return .result()
         }
 
-        skipHabitToday(habit, in: context)
+        try skipHabitToday(habit, in: context)
         try context.save()
-
-        WidgetCenter.shared.reloadTimelines(ofKind: "LureliaHabitsWidget")
 
         return .result()
     }
 
-    private func skipHabitToday(_ habit: LureliaHabit, in context: ModelContext) {
+    private func skipHabitToday(_ habit: LureliaHabit, in context: ModelContext) throws {
         let calendar = Calendar.current
         let todayStart = calendar.startOfDay(for: Date())
 
-        // Don't skip if already logged today
-        let hasLog = (habit.logs ?? []).contains { log in
-            calendar.isDate(log.dayStart, inSameDayAs: todayStart)
+        let logs = try context.fetch(FetchDescriptor<LureliaHabitLog>())
+        let skips = try context.fetch(FetchDescriptor<LureliaHabitSkip>())
+
+        let hasLog = logs.contains { log in
+            log.habit?.id == habit.id
+                && calendar.isDate(log.dayStart, inSameDayAs: todayStart)
+                && max(log.count, log.completedFireTimes.count) > 0
         }
         guard !hasLog else { return }
 
-        // Don't skip if already skipped today
-        let hasSkip = (habit.skips ?? []).contains { skip in
-            calendar.isDate(skip.dayStart, inSameDayAs: todayStart)
+        let hasSkip = skips.contains { skip in
+            skip.habit?.id == habit.id
+                && calendar.isDate(skip.dayStart, inSameDayAs: todayStart)
         }
         guard !hasSkip else { return }
 
         let skip = LureliaHabitSkip(habit: habit, dayStart: todayStart)
         context.insert(skip)
+        habit.skips = (habit.skips ?? []) + [skip]
         habit.updatedAt = Date()
+    }
+
+    private func reloadHabitWidgets() {
+        WidgetCenter.shared.reloadTimelines(ofKind: "LureliaHabitsWidget")
+        WidgetCenter.shared.reloadTimelines(ofKind: "LureliaKanbanTimelineWidget")
+        WidgetCenter.shared.reloadAllTimelines()
     }
 }

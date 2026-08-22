@@ -4,6 +4,7 @@
 //
 
 import SwiftUI
+import UIKit
 
 // MARK: - Icon Source
 
@@ -499,6 +500,7 @@ enum LureliaIconLibrary {
         .init(name: "starbars", source: .asset, category: "Favorites"),
         .init(name: "starwavy", source: .asset, category: "Favorites"),
         .init(name: "profilewavy", source: .asset, category: "Profile"),
+        .init(name: "qwill", source: .asset, category: "Writing"),
         .init(name: "arrowsprofile", source: .asset, category: "Profile"),
         .init(name: "xsmile", source: .asset, category: "Mood"),
         .init(name: "chartcircle", source: .asset, category: "Stats"),
@@ -513,7 +515,6 @@ enum LureliaIconLibrary {
         .init(name: "starprogressbar", source: .asset, category: "Stats"),
         .init(name: "boltprogress", source: .asset, category: "Stats"),
         .init(name: "shoe", source: .asset, category: "Movement"),
-        .init(name: "dumbbell", source: .asset, category: "Movement"),
         .init(name: "feetprints", source: .asset, category: "Movement"),
         .init(name: "foot", source: .asset, category: "Movement"),
         .init(name: "workout", source: .asset, category: "Movement"),
@@ -524,6 +525,7 @@ enum LureliaIconLibrary {
         .init(name: "jug", source: .asset, category: "Hydration"),
         .init(name: "waterbottle", source: .asset, category: "Hydration"),
         .init(name: "bottlewater", source: .asset, category: "Hydration"),
+        .init(name: "cutebottle", source: .asset, category: "Hydration"),
         .init(name: "sunflower", source: .asset, category: "Nature"),
         .init(name: "sun", source: .asset, category: "Nature"),
         .init(name: "treeoutside", source: .asset, category: "Nature"),
@@ -638,11 +640,76 @@ enum LureliaIconLibrary {
         .init(name: "batcal", source: .asset, category: "Halloween"),
         .init(name: "bones", source: .asset, category: "Halloween"),
         .init(name: "bat", source: .asset, category: "Halloween"),
+        .init(name: "0wavy", source: .asset, category: "Numbers"),
+        .init(name: "1wavy", source: .asset, category: "Numbers"),
+        .init(name: "2wavy", source: .asset, category: "Numbers"),
+        .init(name: "3wavy", source: .asset, category: "Numbers"),
+        .init(name: "4wavy", source: .asset, category: "Numbers"),
+        .init(name: "5wavy", source: .asset, category: "Numbers"),
+        .init(name: "6wavy", source: .asset, category: "Numbers"),
+        .init(name: "7wavy", source: .asset, category: "Numbers"),
+        .init(name: "8wavy", source: .asset, category: "Numbers"),
+        .init(name: "9wavy", source: .asset, category: "Numbers"),
+        .init(name: "arrowin", source: .asset, category: "Navigation"),
+        .init(name: "backpack", source: .asset, category: "Bags"),
+        .init(name: "bookbag", source: .asset, category: "Bags"),
+        .init(name: "candleslit", source: .asset, category: "Spirituality"),
+        .init(name: "cloudie", source: .asset, category: "Nature"),
+        .init(name: "coinssparkle", source: .asset, category: "Money"),
+        .init(name: "colorpencils", source: .asset, category: "Creative"),
+        .init(name: "doclineslove", source: .asset, category: "Documents"),
+        .init(name: "flowerfilled", source: .asset, category: "Nature"),
+        .init(name: "heartbaid", source: .asset, category: "Health"),
+        .init(name: "heartunlock", source: .asset, category: "Security"),
+        .init(name: "leftarrow", source: .asset, category: "Navigation"),
+        .init(name: "lovebandage", source: .asset, category: "Health"),
+        .init(name: "lovebandaid", source: .asset, category: "Health"),
+        .init(name: "lovedeck", source: .asset, category: "Spirituality"),
+        .init(name: "loveflag", source: .asset, category: "Goals"),
+        .init(name: "luvmailfill", source: .asset, category: "Communication"),
+        .init(name: "medicalcross", source: .asset, category: "Health"),
+        .init(name: "notespen", source: .asset, category: "Notes"),
+        .init(name: "questionwavy", source: .asset, category: "Info"),
+        .init(name: "quote", source: .asset, category: "Writing"),
+        .init(name: "rainbowclouds", source: .asset, category: "Whimsy"),
+        .init(name: "rainbowmug", source: .asset, category: "Kitchen"),
+        .init(name: "recovery", source: .asset, category: "Care"),
+        .init(name: "rewardscard", source: .asset, category: "Rewards"),
+        .init(name: "rightarrow", source: .asset, category: "Navigation"),
+        .init(name: "ringstarcal", source: .asset, category: "Schedule"),
+        .init(name: "seedling", source: .asset, category: "Nature"),
+        .init(name: "sparklearrowprogress", source: .asset, category: "Stats"),
+        .init(name: "sparklesstarflag", source: .asset, category: "Goals"),
+        .init(name: "starbadge", source: .asset, category: "Favorites"),
+        .init(name: "starchat", source: .asset, category: "Communication"),
+        .init(name: "starhandtrophy", source: .asset, category: "Rewards"),
+        .init(name: "starladder", source: .asset, category: "Goals"),
+        .init(name: "starmailing", source: .asset, category: "Communication"),
+        .init(name: "starskey", source: .asset, category: "Security"),
+        .init(name: "starsparklesbox", source: .asset, category: "Objects"),
+        .init(name: "startarget", source: .asset, category: "Goals"),
+        .init(name: "startrophyfill", source: .asset, category: "Rewards"),
+        .init(name: "startrophyhand", source: .asset, category: "Rewards"),
+        .init(name: "startrophyhands", source: .asset, category: "Rewards"),
+        .init(name: "totebag", source: .asset, category: "Bags"),
+        .init(name: "twopencils", source: .asset, category: "Writing"),
+        .init(name: "warnwavy", source: .asset, category: "Info"),
+        .init(name: "webcircle", source: .asset, category: "Tech"),
     ]
     
     // MARK: - Combined Library
     
-    static let allIcons: [LureliaIconItem] = assetIcons + sfSymbols
+    static let allIcons: [LureliaIconItem] = uniqueRenderableIcons(assetIcons + sfSymbols)
+
+    private static let iconsByName: [String: LureliaIconItem] = {
+        var result: [String: LureliaIconItem] = [:]
+
+        for icon in allIcons where result[icon.name] == nil {
+            result[icon.name] = icon
+        }
+
+        return result
+    }()
     
     static var categories: [String] {
         Array(Set(allIcons.map(\.category))).sorted()
@@ -650,6 +717,10 @@ enum LureliaIconLibrary {
     
     static func icons(in category: String) -> [LureliaIconItem] {
         allIcons.filter { $0.category == category }
+    }
+
+    static func icon(named name: String) -> LureliaIconItem? {
+        iconsByName[name.trimmingCharacters(in: .whitespacesAndNewlines)]
     }
     
     static func search(_ query: String) -> [LureliaIconItem] {
@@ -662,6 +733,27 @@ enum LureliaIconLibrary {
         return allIcons.filter {
             $0.name.localizedCaseInsensitiveContains(trimmedQuery)
             || $0.category.localizedCaseInsensitiveContains(trimmedQuery)
+        }
+    }
+
+    private static func uniqueRenderableIcons(_ icons: [LureliaIconItem]) -> [LureliaIconItem] {
+        var seenIDs = Set<String>()
+
+        return icons.filter { icon in
+            guard seenIDs.insert(icon.id).inserted else {
+                return false
+            }
+
+            return isRenderable(icon)
+        }
+    }
+
+    private static func isRenderable(_ icon: LureliaIconItem) -> Bool {
+        switch icon.source {
+        case .asset:
+            return UIImage(named: icon.name) != nil
+        case .sfSymbol:
+            return UIImage(systemName: icon.name) != nil
         }
     }
 }

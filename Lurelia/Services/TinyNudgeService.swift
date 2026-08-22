@@ -8,6 +8,7 @@ import Foundation
 enum TinyNudgeTaskType: String, Codable {
     case reminder
     case habit
+    case routine
 }
 
 struct TinyNudgeRequest: Codable {
@@ -43,7 +44,7 @@ final class TinyNudgeService {
 
     private init() {}
 
-    private let baseURL = "https://lystaria-api-production.up.railway.app/api/tiny-nudge"
+    private let baseURL = "https://appapi.voxiverse.ink/api/tiny-nudge"
 
     func convinceMe(
         taskType: TinyNudgeTaskType,

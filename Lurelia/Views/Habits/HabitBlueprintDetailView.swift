@@ -15,6 +15,11 @@ struct HabitBlueprintDetailView: View {
 
     @Query(sort: \LureliaHabit.createdAt)
     private var allHabits: [LureliaHabit]
+
+    /// The habit's user-selected color. Drives the Blueprint's visual identity
+    /// (replaces the app-wide cyan/purple gradient across this view).
+    private var accent: Color { habit.color }
+    private var accentStyle: AnyShapeStyle { AnyShapeStyle(accent) }
     
     @State private var frictionEditing = false
     @State private var frictionDraft = ""
@@ -45,7 +50,7 @@ struct HabitBlueprintDetailView: View {
                                 .resizable()
                                 .scaledToFit()
                                 .frame(width: 28, height: 28)
-                                .foregroundStyle(LGradients.header)
+                                .foregroundStyle(accentStyle)
                         }
                         .buttonStyle(.plain)
                     }
@@ -55,9 +60,9 @@ struct HabitBlueprintDetailView: View {
 
                     // MARK: - Icon + Title + Description
 
-                    GlassCard {
+                    GlassCard(tint: accent) {
                         VStack(spacing: 10) {
-                            BlueprintIconPreview(iconName: habit.iconName ?? "flame")
+                            BlueprintIconPreview(iconName: habit.iconName ?? "flame", tint: accent)
 
                             Text(habit.title)
                                 .font(.system(size: 24, weight: .black, design: .rounded))
@@ -76,6 +81,8 @@ struct HabitBlueprintDetailView: View {
                     }
                     .padding(.horizontal, 24)
 
+                    undoProgressButton
+
                     // MARK: - Schedule & Frequency
 
                     VStack(alignment: .leading, spacing: 10) {
@@ -85,19 +92,20 @@ struct HabitBlueprintDetailView: View {
                                 .resizable()
                                 .scaledToFit()
                                 .frame(width: 18, height: 18)
-                                .foregroundStyle(LGradients.header)
+                                .foregroundStyle(accentStyle)
 
                             Text("Schedule")
                                 .font(.system(size: 16, weight: .bold, design: .rounded))
                                 .foregroundStyle(.white)
                         }
 
-                        GlassCard {
+                        GlassCard(tint: accent) {
                             VStack(alignment: .leading, spacing: 12) {
                                 HStack(spacing: 8) {
                                     detailPill(scheduleSummary)
                                     detailPill("\(habit.target)x per day")
                                     detailPill("\(habit.daysPerWeek) day\(habit.daysPerWeek == 1 ? "" : "s")/week")
+                                    detailPill(alarmSummary)
                                 }
 
                                 if habit.activeWeekdays.count < 7 {
@@ -110,7 +118,7 @@ struct HabitBlueprintDetailView: View {
                                                 .frame(width: 32, height: 28)
                                                 .background(
                                                     active
-                                                    ? AnyShapeStyle(LGradients.header)
+                                                    ? accentStyle
                                                     : AnyShapeStyle(Color.white.opacity(0.06))
                                                 )
                                                 .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
@@ -132,21 +140,21 @@ struct HabitBlueprintDetailView: View {
                                 .resizable()
                                 .scaledToFit()
                                 .frame(width: 18, height: 18)
-                                .foregroundStyle(LGradients.header)
+                                .foregroundStyle(accentStyle)
 
                             Text("Today's Progress")
                                 .font(.system(size: 16, weight: .bold, design: .rounded))
                                 .foregroundStyle(.white)
                         }
 
-                        GlassCard {
+                        GlassCard(tint: accent) {
                             VStack(alignment: .leading, spacing: 14) {
                                 HStack(spacing: 8) {
                                     ForEach(0..<habit.target, id: \.self) { i in
                                         Circle()
                                             .fill(
                                                 i < habit.todaysCount
-                                                ? AnyShapeStyle(LGradients.header)
+                                                ? accentStyle
                                                 : AnyShapeStyle(Color.white.opacity(0.15))
                                             )
                                             .frame(width: 12, height: 12)
@@ -182,7 +190,7 @@ struct HabitBlueprintDetailView: View {
                                                 .frame(height: 6)
 
                                             RoundedRectangle(cornerRadius: 4)
-                                                .fill(LGradients.header)
+                                                .fill(accent)
                                                 .frame(width: geo.size.width * habit.progress, height: 6)
                                                 .animation(.spring(duration: 0.4), value: habit.progress)
                                         }
@@ -257,14 +265,14 @@ struct HabitBlueprintDetailView: View {
                                     .resizable()
                                     .scaledToFit()
                                     .frame(width: 18, height: 18)
-                                    .foregroundStyle(LGradients.header)
+                                    .foregroundStyle(accentStyle)
 
                                 Text("Implementation Intention")
                                     .font(.system(size: 16, weight: .bold, design: .rounded))
                                     .foregroundStyle(.white)
                             }
 
-                            GlassCard {
+                            GlassCard(tint: accent) {
                                 Text(intention)
                                     .font(.system(size: 16, weight: .semibold, design: .rounded))
                                     .foregroundStyle(.white)
@@ -286,7 +294,7 @@ struct HabitBlueprintDetailView: View {
                                             .resizable()
                                             .scaledToFit()
                                             .frame(width: 18, height: 18)
-                                            .foregroundStyle(LGradients.header)
+                                            .foregroundStyle(accentStyle)
 
                                         Text(cueType.label)
                                             .font(.system(size: 14, weight: .bold, design: .rounded))
@@ -466,6 +474,44 @@ struct HabitBlueprintDetailView: View {
 
     // MARK: - Reusable Section Card
 
+    private var undoProgressButton: some View {
+        Button {
+            undoLatestCompletionToday()
+        } label: {
+            HStack(spacing: 10) {
+                Image("minuswavy")
+                    .renderingMode(.template)
+                    .resizable()
+                    .scaledToFit()
+                    .frame(width: 18, height: 18)
+                    .foregroundStyle(.white)
+
+                Text("Undo Last Completion")
+                    .font(.system(size: 15, weight: .black, design: .rounded))
+                    .foregroundStyle(.white)
+            }
+            .frame(maxWidth: .infinity)
+            .frame(height: 54)
+            .background(
+                RoundedRectangle(cornerRadius: 18, style: .continuous)
+                    .fill(accent)
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: 18, style: .continuous)
+                    .strokeBorder(.white.opacity(hasProgressToday ? 0.24 : 0.08), lineWidth: 1)
+            )
+            .opacity(hasProgressToday ? 1 : 0.38)
+        }
+        .buttonStyle(.plain)
+        .disabled(!hasProgressToday)
+        .padding(.horizontal, 24)
+    }
+
+    private var hasProgressToday: Bool {
+        guard let todayLog = habit.todaysLog() else { return false }
+        return todayLog.count > 0 || !todayLog.completedFireTimes.isEmpty
+    }
+
     private func sectionCard<Content: View>(
         title: String,
         icon: String,
@@ -478,14 +524,14 @@ struct HabitBlueprintDetailView: View {
                     .resizable()
                     .scaledToFit()
                     .frame(width: 22, height: 22)
-                    .foregroundStyle(LGradients.header)
+                    .foregroundStyle(accentStyle)
 
                 Text(title)
                     .font(.system(size: 16, weight: .bold, design: .rounded))
                     .foregroundStyle(.white)
             }
 
-            GlassCard {
+            GlassCard(tint: accent) {
                 content()
                     .frame(maxWidth: .infinity, alignment: .leading)
             }
@@ -496,7 +542,7 @@ struct HabitBlueprintDetailView: View {
     // MARK: - Streak Card
 
     private func streakCard(label: String, value: String, unit: String) -> some View {
-        GlassCard {
+        GlassCard(tint: accent) {
             VStack(alignment: .leading, spacing: 6) {
                 Text(label.uppercased())
                     .font(.system(size: 10, weight: .semibold, design: .rounded))
@@ -532,14 +578,14 @@ struct HabitBlueprintDetailView: View {
                         .resizable()
                         .scaledToFit()
                         .frame(width: 18, height: 18)
-                        .foregroundStyle(LGradients.header)
+                        .foregroundStyle(accentStyle)
 
                     Text("Cue Insights")
                         .font(.system(size: 16, weight: .bold, design: .rounded))
                         .foregroundStyle(.white)
                 }
 
-                GlassCard {
+                GlassCard(tint: accent) {
                     VStack(alignment: .leading, spacing: 10) {
                         ForEach(cueCounts, id: \.type) { entry in
                             HStack(spacing: 12) {
@@ -548,7 +594,7 @@ struct HabitBlueprintDetailView: View {
                                     .resizable()
                                     .scaledToFit()
                                     .frame(width: 16, height: 16)
-                                    .foregroundStyle(LGradients.header)
+                                    .foregroundStyle(accentStyle)
 
                                 Text(entry.type.label)
                                     .font(.system(size: 14, weight: .semibold, design: .rounded))
@@ -646,7 +692,7 @@ struct HabitBlueprintDetailView: View {
                         .frame(height: 52)
                         .background(
                             RoundedRectangle(cornerRadius: 18, style: .continuous)
-                                .fill(LGradients.header)
+                                .fill(accent)
                         )
                 }
                 .buttonStyle(.plain)
@@ -665,7 +711,7 @@ struct HabitBlueprintDetailView: View {
                             .resizable()
                             .scaledToFit()
                             .frame(width: 16, height: 16)
-                            .foregroundStyle(LGradients.header)
+                            .foregroundStyle(accentStyle)
 
                         Text("Add Friction")
                             .font(.system(size: 14, weight: .semibold, design: .rounded))
@@ -747,6 +793,37 @@ struct HabitBlueprintDetailView: View {
         }
     }
 
+    private func undoLatestCompletionToday() {
+        let calendar = Calendar.current
+        let today = Date()
+        guard let todayLog = habit.todaysLog(calendar: calendar) else { return }
+
+        let didUndo = todayLog.undoLatestCompletion(
+            fireDates: habit.fireDates(on: today, calendar: calendar),
+            calendar: calendar
+        )
+        guard didUndo else { return }
+
+        if todayLog.count <= 0 && todayLog.completedFireTimes.isEmpty {
+            modelContext.delete(todayLog)
+            habit.logs = (habit.logs ?? []).filter {
+                $0.persistentModelID != todayLog.persistentModelID
+            }
+        } else {
+            habit.logs = (habit.logs ?? []).map { log in
+                log.persistentModelID == todayLog.persistentModelID ? todayLog : log
+            }
+        }
+
+        habit.updatedAt = Date()
+
+        withAnimation(.spring(response: 0.28, dampingFraction: 0.86)) {
+            try? modelContext.save()
+        }
+
+        LureliaWidgetReloads.reloadAll()
+    }
+
     private func dismissKeyboard() {
         UIApplication.shared.sendAction(
             #selector(UIResponder.resignFirstResponder),
@@ -759,7 +836,7 @@ struct HabitBlueprintDetailView: View {
     private func numberedCircle(_ number: Int) -> some View {
         ZStack {
             Circle()
-                .strokeBorder(LGradients.header, lineWidth: 1.5)
+                .strokeBorder(accent, lineWidth: 1.5)
                 .frame(width: 26, height: 26)
 
             Text("\(number)")
@@ -778,7 +855,7 @@ struct HabitBlueprintDetailView: View {
                 .resizable()
                 .scaledToFit()
                 .frame(width: 22, height: 22)
-                .foregroundStyle(LGradients.header)
+                .foregroundStyle(accentStyle)
 
             Text(level.title)
                 .font(.system(size: 14, weight: .semibold, design: .rounded))
@@ -823,6 +900,17 @@ struct HabitBlueprintDetailView: View {
         let labels: [Int: String] = [1: "Sun", 2: "Mon", 3: "Tue", 4: "Wed", 5: "Thu", 6: "Fri", 7: "Sat"]
         return weekdays.sorted().compactMap { labels[$0] }.joined(separator: ", ")
     }
+
+    private var alarmSummary: String {
+        guard habit.alarmEnabled else { return "Alarm Off" }
+        let storedAlarmCount = Set(
+            habit.alarmFireTimes.map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+        )
+        .filter { !$0.isEmpty }
+        .count
+        let count = storedAlarmCount > 0 ? storedAlarmCount : min(max(habit.timesOfDay.count, 1), 1)
+        return count == 1 ? "1 alarm" : "\(count) alarms"
+    }
     
     private var sortedLevels: [LureliaHabitLevel] {
         habit.levels
@@ -860,24 +948,16 @@ struct HabitBlueprintDetailView: View {
 
 private struct BlueprintIconPreview: View {
     let iconName: String
+    let tint: Color
 
     var body: some View {
         ZStack {
             Circle()
-                .fill(
-                    LinearGradient(
-                        colors: [
-                            LColors.gradientBlue.opacity(0.22),
-                            LColors.gradientPurple.opacity(0.20)
-                        ],
-                        startPoint: .topLeading,
-                        endPoint: .bottomTrailing
-                    )
-                )
+                .fill(tint.opacity(0.22))
                 .frame(width: 48, height: 48)
 
             Circle()
-                .strokeBorder(LGradients.header, lineWidth: 1.15)
+                .strokeBorder(tint, lineWidth: 1.15)
                 .frame(width: 48, height: 48)
 
             Image(iconName)

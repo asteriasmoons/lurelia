@@ -14,7 +14,6 @@ struct RoutineDetailView: View {
     @Environment(\.scenePhase) private var scenePhase
     
     let routineID: PersistentIdentifier
-    let refreshID: UUID
 
     @Query private var routines: [LureliaRoutine]
 
@@ -26,11 +25,9 @@ struct RoutineDetailView: View {
     }
 
     init(
-        routineID: PersistentIdentifier,
-        refreshID: UUID = UUID()
+        routineID: PersistentIdentifier
     ) {
         self.routineID = routineID
-        self.refreshID = refreshID
 
         let descriptor = FetchDescriptor<LureliaRoutine>(
             predicate: #Predicate<LureliaRoutine> { routine in
@@ -48,10 +45,18 @@ struct RoutineDetailView: View {
     @State private var editingTask: LureliaRoutineTask?
     @State private var editingPhase: LureliaRoutinePhase?
     @State private var didCheckNotificationPermission = false
-    @State private var viewRefreshID = UUID()
+    @State private var showContractCreator = false
+    @State private var viewingContract: LureliaRoutineContract?
+    @State private var offDayPickerExpanded = false
+    @State private var pendingOffDayDate = Date()
+    @State private var offDayValidationMessage: String?
     
     private var routineTint: Color {
         Color(lureliaHex: routine.colorHex)
+    }
+
+    private var isPad: Bool {
+        UIDevice.current.userInterfaceIdiom == .pad
     }
     
     private var activeRun: LureliaRoutineRun? {
@@ -62,6 +67,10 @@ struct RoutineDetailView: View {
 
     private enum RoutineScheduleStatus {
         case dueNow, soon, none
+    }
+
+    private enum RoutineTaskDayState {
+        case pending, completed, skipped
     }
 
     private var scheduleStatus: RoutineScheduleStatus {
@@ -84,7 +93,7 @@ struct RoutineDetailView: View {
             let nowMins = calendar.component(.hour, from: now) * 60 + calendar.component(.minute, from: now)
 
             if nowMins >= earliestStart && nowMins <= latestEnd { return .dueNow }
-            if nowMins > latestEnd && !routine.allTasksDone { return .dueNow }
+            if nowMins > latestEnd && !routineAllTasksResolvedToday { return .dueNow }
             if nowMins < earliestStart { return .soon }
             return .none
         }
@@ -96,7 +105,7 @@ struct RoutineDetailView: View {
         let nowMins = calendar.component(.hour, from: now) * 60 + calendar.component(.minute, from: now)
 
         if nowMins >= startMins && nowMins <= endMins { return .dueNow }
-        if nowMins > endMins && !routine.allTasksDone { return .dueNow }
+        if nowMins > endMins && !routineAllTasksResolvedToday { return .dueNow }
         if nowMins < startMins { return .soon }
         return .none
     }
@@ -149,7 +158,7 @@ struct RoutineDetailView: View {
             return activeRun.isPaused ? "Paused" : "Running"
         }
         
-        if routine.allTasksDone { return "Completed" }
+        if routineAllTasksResolvedToday { return "Completed" }
         
         return routine.scheduleEnabled ? "Scheduled" : "Ready"
     }
@@ -159,17 +168,57 @@ struct RoutineDetailView: View {
             return activeRun.isPaused ? "pausewavy" : "playwavy"
         }
         
-        if routine.allTasksDone { return "checkwavy" }
+        if routineAllTasksResolvedToday { return "checkwavy" }
         
         return routine.scheduleEnabled ? "bellfill" : "sparkle"
     }
     
     private var adaptiveRoutineTextColor: Color {
-        routineTint.isLightColor ? .black.opacity(0.88) : .white
+        .white.opacity(0.92)
     }
     
     private var adaptiveRoutineSecondaryTextColor: Color {
-        routineTint.isLightColor ? .black.opacity(0.62) : .white.opacity(0.72)
+        .white.opacity(0.72)
+    }
+
+    private var routineFillTextColor: Color {
+        routineTint.wcagContrastingSolidTextColor
+    }
+
+    private func taskDayState(
+        _ task: LureliaRoutineTask,
+        on day: Date = Date(),
+        calendar: Calendar = .current
+    ) -> RoutineTaskDayState {
+        if let entry = task.sortedHistory.first(where: { calendar.isDate($0.date, inSameDayAs: day) }) {
+            return entry.wasCompleted ? .completed : .skipped
+        }
+
+        if let completedAt = task.completedAt,
+           calendar.isDate(completedAt, inSameDayAs: day) {
+            return .completed
+        }
+
+        if let skippedAt = task.skippedAt,
+           calendar.isDate(skippedAt, inSameDayAs: day) {
+            return .skipped
+        }
+
+        if task.isCompleted, task.completedAt == nil {
+            return .completed
+        }
+
+        if task.isSkipped, task.skippedAt == nil {
+            return .skipped
+        }
+
+        return .pending
+    }
+
+    private var routineAllTasksResolvedToday: Bool {
+        let allTasks = routine.sortedTasks
+        guard !allTasks.isEmpty else { return false }
+        return allTasks.allSatisfy { taskDayState($0) != .pending }
     }
     
     private func requestNotificationPermissionIfNeeded() async {
@@ -185,19 +234,14 @@ struct RoutineDetailView: View {
         _ = await LureliaNotificationManager.shared.requestPermission()
     }
     
-    // MARK: - CRITICAL FIX
-        private func forceContextRefresh() {
-            // Tells SwiftData to instantly process mutations that occurred externally (like via Widget)
-            modelContext.processPendingChanges()
-            
-            // Triggers SwiftUI to completely tear down and rebuild the view layout, forcing a data re-read
-            viewRefreshID = UUID()
-        }
+    private func processExternalRoutineChanges() {
+        modelContext.processPendingChanges()
+    }
     
     var body: some View {
         ZStack {
             LureliaBackgroundAlt()
-            
+
             ScrollView(showsIndicators: false) {
                 VStack(spacing: 18) {
                     customHeader
@@ -227,6 +271,10 @@ struct RoutineDetailView: View {
                                 .foregroundStyle(adaptiveRoutineTextColor)
                         }
                     }
+
+                    routineContractCard
+
+                    routineOffDaysCard
                     
                     if routine.scheduleEnabled {
                         scheduledDaysCard
@@ -238,7 +286,7 @@ struct RoutineDetailView: View {
                     } else {
                         taskFlowCard
                     }
-                    
+
                     if !routine.principles.isEmpty {
                         principlesCard
                     }
@@ -250,25 +298,35 @@ struct RoutineDetailView: View {
                 }
                 .padding(.horizontal, 20)
                 .padding(.top, 14)
+                .routinePageWidthLocked()
             }
+            .routinePageScrollClipped()
         }
-        .id(viewRefreshID) // Attached up top to bind root container redraws directly
         .navigationBarBackButtonHidden(true)
         .navigationBarTitleDisplayMode(.inline)
         .toolbar(.hidden, for: .navigationBar)
         .sheet(isPresented: $showEdit) {
             AddRoutineView(editingRoutine: routine)
         }
-        .sheet(item: $editingTask) { task in
-            EditRoutineTaskSheet(
-                task: task,
+        .routineTaskEditor(
+            isPad: isPad,
+            task: $editingTask,
+            routineTint: routineTint
+        )
+        .sheet(item: $editingPhase) { phase in
+            EditRoutinePhaseSheet(
+                routine: routine,
+                phase: phase,
                 routineTint: routineTint
             )
         }
-        .sheet(item: $editingPhase) { phase in
-            EditRoutinePhaseSheet(
-                phase: phase,
-                routineTint: routineTint
+        .sheet(isPresented: $showContractCreator) {
+            RoutineContractEditorView(routine: routine)
+        }
+        .sheet(item: $viewingContract) { contract in
+            RoutineContractDetailView(
+                contract: contract,
+                routine: routine
             )
         }
         .task {
@@ -279,11 +337,11 @@ struct RoutineDetailView: View {
         }
         .onChange(of: scenePhase) { _, newPhase in
             if newPhase == .active {
-                forceContextRefresh()
+                processExternalRoutineChanges()
             }
         }
         .onReceive(NotificationCenter.default.publisher(for: UIApplication.didBecomeActiveNotification)) { _ in
-            forceContextRefresh()
+            processExternalRoutineChanges()
         }
         .completionBanner(isShowing: showCompletionBanner, message: bannerMessage)
     }
@@ -309,33 +367,35 @@ struct RoutineDetailView: View {
             let endMins = phase.endHour * 60 + phase.endMinute
             let nowMins = calendar.component(.hour, from: now) * 60 + calendar.component(.minute, from: now)
             let isTimeRelevant = nowMins <= endMins || nowMins >= startMins
-            let hasPendingTasks = routine.tasksForPhase(phase).contains { $0.isPending }
+            let hasPendingTasks = routine.tasksForPhase(phase).contains {
+                taskDayState($0) == .pending
+            }
             return isTimeRelevant && hasPendingTasks
         } ?? scheduledPhases.first { phase in
-            routine.tasksForPhase(phase).contains { $0.isPending }
+            routine.tasksForPhase(phase).contains {
+                taskDayState($0) == .pending
+            }
         }
 
         guard let phase = currentPhase else {
-            routine.completeRoutine()
+            RoutineManager.shared.completeRoutine(
+                routine,
+                context: modelContext
+            )
             return
         }
 
         let phaseTasks = routine.tasksForPhase(phase)
-        for task in phaseTasks where task.isPending {
-            task.markCompleted()
-            routine.updatedAt = Date()
-            
-            do {
-                try modelContext.save()
-                WidgetCenter.shared.reloadTimelines(ofKind: "LureliaDueRoutinesWidget")
-            } catch {
-                print("Failed saving manual routine task completion: \(error)")
-            }
+        for task in phaseTasks where taskDayState(task) == .pending {
+            RoutineTaskManager.shared.recordCompletion(
+                task: task,
+                context: modelContext
+            )
         }
 
         routine.updatedAt = Date()
 
-        if routine.allTasksDone {
+        if routineAllTasksResolvedToday {
             routine.lastCompletedAt = Date()
         }
     }
@@ -362,7 +422,8 @@ extension RoutineDetailView {
                     .resizable()
                     .scaledToFit()
                     .frame(width: 17, height: 17)
-                    .foregroundStyle(adaptiveRoutineTextColor)
+                    .foregroundStyle(routineFillTextColor)
+                    .wcagContrastLift(on: routineTint)
                     .frame(width: 40, height: 40)
                     .background(routineTint, in: Circle())
                     .overlay {
@@ -380,7 +441,8 @@ extension RoutineDetailView {
                     .resizable()
                     .scaledToFit()
                     .frame(width: 17, height: 17)
-                    .foregroundStyle(adaptiveRoutineTextColor)
+                    .foregroundStyle(routineFillTextColor)
+                    .wcagContrastLift(on: routineTint)
                     .frame(width: 40, height: 40)
                     .background(routineTint, in: Circle())
                     .overlay {
@@ -409,7 +471,7 @@ extension RoutineDetailView {
                         .frame(width: 54, height: 54)
                         .blur(radius: 16)
                     
-                    LureliaIconView(iconId: routine.icon, size: 34)
+                    LureliaIconView(iconId: routine.icon, size: 36.5)
                         .foregroundStyle(adaptiveRoutineTextColor)
                 }
                 
@@ -522,7 +584,7 @@ extension RoutineDetailView {
                             routine: routine
                         )
                         activeRoutine = routine
-                        WidgetCenter.shared.reloadTimelines(ofKind: "LureliaDueRoutinesWidget")
+                        LureliaWidgetReloads.reloadAll()
                     }
                 } else {
                     primaryActionButton(
@@ -541,7 +603,7 @@ extension RoutineDetailView {
                             routine: routine
                         )
                         try? modelContext.save()
-                        WidgetCenter.shared.reloadTimelines(ofKind: "LureliaDueRoutinesWidget")
+                        LureliaWidgetReloads.reloadAll()
                     }
                 }
                 
@@ -555,9 +617,9 @@ extension RoutineDetailView {
                         wasCompleted: false
                     )
                     try? modelContext.save()
-                    WidgetCenter.shared.reloadTimelines(ofKind: "LureliaDueRoutinesWidget")
+                    LureliaWidgetReloads.reloadAll()
                 }
-            } else if routine.allTasksDone {
+            } else if routineAllTasksResolvedToday {
                 primaryActionButton(
                     title: "Reset Tasks",
                     icon: "arrow.counterclockwise"
@@ -567,7 +629,7 @@ extension RoutineDetailView {
                         try? modelContext.save()
                     }
                     triggerBanner("Tasks reset!")
-                    WidgetCenter.shared.reloadTimelines(ofKind: "LureliaDueRoutinesWidget")
+                    LureliaWidgetReloads.reloadAll()
                 }
                 
                 secondaryActionButton(
@@ -580,7 +642,7 @@ extension RoutineDetailView {
                     )
                     try? modelContext.save()
                     if run.isActive { activeRoutine = routine }
-                    WidgetCenter.shared.reloadTimelines(ofKind: "LureliaDueRoutinesWidget")
+                    LureliaWidgetReloads.reloadAll()
                 }
             } else {
                 primaryActionButton(
@@ -591,17 +653,20 @@ extension RoutineDetailView {
                         if routine.phasesEnabled {
                             completeCurrentPhase()
                         } else {
-                            routine.completeRoutine()
+                            RoutineManager.shared.completeRoutine(
+                                routine,
+                                context: modelContext
+                            )
                         }
                         try? modelContext.save()
-                        WidgetCenter.shared.reloadTimelines(ofKind: "LureliaDueRoutinesWidget")
+                        LureliaWidgetReloads.reloadAll()
                     }
                     triggerBanner(
                         routine.phasesEnabled
-                        ? (routine.allTasksDone ? "Routine completed!" : "Phase completed!")
+                        ? (routineAllTasksResolvedToday ? "Routine completed!" : "Phase completed!")
                         : "Routine completed!"
                     )
-                    WidgetCenter.shared.reloadTimelines(ofKind: "LureliaDueRoutinesWidget")
+                    LureliaWidgetReloads.reloadAll()
                 }
                 
                 secondaryActionButton(
@@ -613,7 +678,7 @@ extension RoutineDetailView {
                         try? modelContext.save()
                     }
                     triggerBanner("Routine skipped")
-                    WidgetCenter.shared.reloadTimelines(ofKind: "LureliaDueRoutinesWidget")
+                    LureliaWidgetReloads.reloadAll()
                 }
                 
                 secondaryActionButton(
@@ -626,7 +691,7 @@ extension RoutineDetailView {
                     )
                     try? modelContext.save()
                     if run.isActive { activeRoutine = routine }
-                    WidgetCenter.shared.reloadTimelines(ofKind: "LureliaDueRoutinesWidget")
+                    LureliaWidgetReloads.reloadAll()
                 }
             }
         }
@@ -693,6 +758,9 @@ extension RoutineDetailView {
                                 Circle()
                                     .fill(routineTint.opacity(0.18))
                                     .frame(width: 34, height: 34)
+                                Circle()
+                                    .strokeBorder(routineTint.opacity(0.65), lineWidth: 1)
+                                    .frame(width: 34, height: 34)
                                 Text(shortWeekdayLabel(for: weekday))
                                     .font(.system(size: 10, weight: .black, design: .rounded))
                                     .foregroundStyle(routineTint)
@@ -726,6 +794,269 @@ extension RoutineDetailView {
             }
         }
     }
+
+    private var routineContractCard: some View {
+        detailSectionCard(title: "Routine Contract", icon: "contract") {
+            if let contract = routine.currentContract {
+                currentContractSummary(contract)
+            } else {
+                emptyContractSummary
+            }
+        }
+    }
+
+    private var routineOffDaysCard: some View {
+        detailSectionCard(title: "Off Days", icon: "snooze") {
+            VStack(alignment: .leading, spacing: 12) {
+                let offDays = routine.sortedOffDayDates()
+
+                if offDays.isEmpty {
+                    emptySectionText("No off days selected.")
+                } else {
+                    VStack(spacing: 8) {
+                        ForEach(offDays, id: \.self) { date in
+                            offDayRow(date)
+                        }
+                    }
+                }
+
+                if offDayPickerExpanded {
+                    offDayPicker
+                }
+
+                if let offDayValidationMessage {
+                    Text(offDayValidationMessage)
+                        .font(.system(size: 11, weight: .black, design: .rounded))
+                        .foregroundStyle(routineTint)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+
+                Button {
+                    withAnimation(.spring(response: 0.28, dampingFraction: 0.82)) {
+                        pendingOffDayDate = normalizedOffDay(Date())
+                        offDayValidationMessage = nil
+                        offDayPickerExpanded.toggle()
+                    }
+                } label: {
+                    HStack(spacing: 8) {
+                        Image(offDayPickerExpanded ? "xmarkwavy" : "addwavy")
+                            .renderingMode(.template)
+                            .resizable()
+                            .scaledToFit()
+                            .frame(width: 13, height: 13)
+
+                        Text(offDayPickerExpanded ? "Close Picker" : "Pick Off Day")
+                            .font(.system(size: 13, weight: .black, design: .rounded))
+                    }
+                    .foregroundStyle(routineFillTextColor)
+                    .wcagContrastLift(on: routineTint)
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 11)
+                    .background(routineTint, in: RoundedRectangle(cornerRadius: 15, style: .continuous))
+                    .overlay {
+                        RoundedRectangle(cornerRadius: 15, style: .continuous)
+                            .strokeBorder(Color.white.opacity(0.14), lineWidth: 1)
+                    }
+                }
+                .buttonStyle(.plain)
+            }
+        }
+    }
+
+    private var offDayPicker: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            LureliaTintedDateDrumPicker(
+                date: $pendingOffDayDate,
+                tint: routineTint,
+                minimumDate: offDayPickerRange.lowerBound,
+                maximumDate: offDayPickerRange.upperBound
+            )
+
+            Button {
+                addPendingOffDay()
+            } label: {
+                HStack(spacing: 8) {
+                    Image("addwavy")
+                        .renderingMode(.template)
+                        .resizable()
+                        .scaledToFit()
+                        .frame(width: 13, height: 13)
+
+                    Text("Add Off Day")
+                        .font(.system(size: 13, weight: .black, design: .rounded))
+                }
+                .foregroundStyle(routineTint)
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, 11)
+                .background(routineTint.opacity(0.16), in: RoundedRectangle(cornerRadius: 15, style: .continuous))
+                .overlay {
+                    RoundedRectangle(cornerRadius: 15, style: .continuous)
+                        .strokeBorder(routineTint.opacity(0.45), lineWidth: 1)
+                }
+            }
+            .buttonStyle(.plain)
+        }
+        .padding(10)
+        .background(LColors.glassSurface2, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+        .overlay {
+            RoundedRectangle(cornerRadius: 18, style: .continuous)
+                .strokeBorder(routineTint.opacity(0.35), lineWidth: 1)
+        }
+    }
+
+    private func offDayRow(_ date: Date) -> some View {
+        HStack(spacing: 10) {
+            ZStack {
+                Circle()
+                    .fill(routineTint.opacity(0.18))
+                    .frame(width: 34, height: 34)
+
+                Image("starcal")
+                    .renderingMode(.template)
+                    .resizable()
+                    .scaledToFit()
+                    .frame(width: 14, height: 14)
+                    .foregroundStyle(routineTint)
+            }
+
+            VStack(alignment: .leading, spacing: 2) {
+                Text(offDayTitle(for: date))
+                    .font(.system(size: 14, weight: .black, design: .rounded))
+                    .foregroundStyle(adaptiveRoutineTextColor)
+
+                Text(date.formatted(date: .abbreviated, time: .omitted))
+                    .font(.system(size: 11, weight: .bold, design: .rounded))
+                    .foregroundStyle(adaptiveRoutineSecondaryTextColor)
+            }
+
+            Spacer()
+
+            Button {
+                withAnimation(.spring(response: 0.28, dampingFraction: 0.82)) {
+                    routine.removeOffDay(date)
+                    routine.refreshCurrentContractStatusIfNeeded()
+                    try? modelContext.save()
+                    LureliaWidgetReloads.reloadAll()
+                }
+            } label: {
+                Image("minuswavy")
+                    .renderingMode(.template)
+                    .resizable()
+                    .scaledToFit()
+                    .frame(width: 12, height: 12)
+                    .foregroundStyle(routineTint)
+                    .frame(width: 30, height: 30)
+                    .background(routineTint.opacity(0.13), in: Circle())
+                    .overlay {
+                        Circle()
+                            .strokeBorder(routineTint.opacity(0.35), lineWidth: 1)
+                    }
+            }
+            .buttonStyle(.plain)
+        }
+        .padding(10)
+        .background(routineTint.opacity(0.10), in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+        .overlay {
+            RoundedRectangle(cornerRadius: 16, style: .continuous)
+                .strokeBorder(routineTint.opacity(0.30), lineWidth: 1)
+        }
+    }
+
+    private var emptyContractSummary: some View {
+        VStack(alignment: .leading, spacing: 13) {
+            HStack(alignment: .top, spacing: 12) {
+                ZStack {
+                    Circle()
+                        .fill(routineTint.opacity(0.20))
+                        .frame(width: 48, height: 48)
+
+                    Image("qwill")
+                        .renderingMode(.template)
+                        .resizable()
+                        .scaledToFit()
+                        .frame(width: 23, height: 23)
+                        .foregroundStyle(routineTint)
+                }
+
+                VStack(alignment: .leading, spacing: 5) {
+                    Text("No contract created yet")
+                        .font(.system(size: 17, weight: .black, design: .rounded))
+                        .foregroundStyle(adaptiveRoutineTextColor)
+
+                    Text("Make a formal commitment for this routine when you are ready to sign your name to it.")
+                        .font(.system(size: 12, weight: .bold, design: .rounded))
+                        .foregroundStyle(adaptiveRoutineSecondaryTextColor)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+
+                Spacer()
+            }
+
+            contractActionButton(
+                title: "Create Contract",
+                icon: "circlefingerprint"
+            ) {
+                showContractCreator = true
+            }
+        }
+    }
+
+    private func currentContractSummary(_ contract: LureliaRoutineContract) -> some View {
+        contractActionButton(
+            title: "View Contract",
+            icon: "starnote"
+        ) {
+            viewingContract = contract
+        }
+    }
+
+    private func contractSummaryPill(_ title: String, icon: String) -> some View {
+        HStack(spacing: 5) {
+            LureliaIconView(iconId: icon, size: 11)
+                .foregroundStyle(routineTint)
+
+            Text(title)
+                .font(.system(size: 11, weight: .black, design: .rounded))
+                .foregroundStyle(adaptiveRoutineSecondaryTextColor)
+                .lineLimit(1)
+        }
+        .padding(.horizontal, 8)
+        .padding(.vertical, 6)
+        .background(routineTint.opacity(0.14), in: Capsule())
+        .overlay {
+            Capsule()
+                .strokeBorder(routineTint.opacity(0.38), lineWidth: 1)
+        }
+    }
+
+    private func contractActionButton(
+        title: String,
+        icon: String,
+        action: @escaping () -> Void
+    ) -> some View {
+        Button(action: action) {
+            HStack(spacing: 9) {
+                Image(icon)
+                    .renderingMode(.template)
+                    .resizable()
+                    .scaledToFit()
+                    .frame(width: 15, height: 15)
+
+                Text(title)
+                    .font(.system(size: 14, weight: .black, design: .rounded))
+            }
+            .foregroundStyle(routineFillTextColor)
+            .wcagContrastLift(on: routineTint)
+            .frame(maxWidth: .infinity)
+            .padding(.vertical, 12)
+            .background(routineTint, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+            .overlay {
+                RoundedRectangle(cornerRadius: 16, style: .continuous)
+                    .strokeBorder(Color.white.opacity(0.16), lineWidth: 1)
+            }
+        }
+        .buttonStyle(.plain)
+    }
     
     private var taskFlowCard: some View {
         detailSectionCard(title: "Routine Flow", icon: "starnote") {
@@ -747,60 +1078,75 @@ extension RoutineDetailView {
     
     @ViewBuilder
     private func taskRow(task: LureliaRoutineTask) -> some View {
+        let dayState = taskDayState(task)
+        let isPendingToday = dayState == .pending
+        let isCompletedToday = dayState == .completed
+        let isSkippedToday = dayState == .skipped
+
         HStack(spacing: 12) {
-            ZStack {
-                Circle()
-                    .fill(Color.white.opacity(0.08))
-                    .frame(width: 34, height: 34)
-                Circle()
-                    .strokeBorder(routineTint.opacity(0.8), lineWidth: 1)
-                    .frame(width: 34, height: 34)
-                LureliaIconView(iconId: task.icon, size: 15)
-                    .foregroundStyle(task.isPending ? routineTint : adaptiveRoutineSecondaryTextColor)
-            }
-            
-            VStack(alignment: .leading, spacing: 3) {
-                Text(task.title)
-                    .font(.system(size: 14, weight: .semibold, design: .rounded))
-                    .foregroundStyle(task.isPending ? adaptiveRoutineTextColor : adaptiveRoutineSecondaryTextColor)
-                    .strikethrough(!task.isPending, color: adaptiveRoutineSecondaryTextColor)
-                
-                let cleanedNotes = task.notes.trimmingCharacters(in: .whitespacesAndNewlines)
-                if !cleanedNotes.isEmpty {
-                    Text(cleanedNotes)
-                        .font(.system(size: 12, weight: .medium, design: .rounded))
-                        .foregroundStyle(adaptiveRoutineSecondaryTextColor)
-                        .lineLimit(3)
-                        .fixedSize(horizontal: false, vertical: true)
-                }
-                
-                if task.isSkipped {
-                    HStack(spacing: 5) {
-                        Image("skipwavy").renderingMode(.template).resizable().scaledToFit()
-                            .frame(width: 11, height: 11)
-                        Text("Skipped").font(.system(size: 10, weight: .bold, design: .rounded))
+            NavigationLink(value: task.id) {
+                HStack(spacing: 12) {
+                    ZStack {
+                        Circle()
+                            .fill(Color.white.opacity(0.08))
+                            .frame(width: 34, height: 34)
+                        Circle()
+                            .strokeBorder(routineTint.opacity(0.8), lineWidth: 1)
+                            .frame(width: 34, height: 34)
+                        LureliaIconView(iconId: task.icon, size: 15)
+                            .foregroundStyle(isPendingToday ? routineTint : adaptiveRoutineSecondaryTextColor)
                     }
-                    .foregroundStyle(adaptiveRoutineSecondaryTextColor)
+
+                    VStack(alignment: .leading, spacing: 3) {
+                        Text(task.title)
+                            .font(.system(size: 14, weight: .semibold, design: .rounded))
+                            .foregroundStyle(isPendingToday ? adaptiveRoutineTextColor : adaptiveRoutineSecondaryTextColor)
+                            .strikethrough(!isPendingToday, color: adaptiveRoutineSecondaryTextColor)
+                            .multilineTextAlignment(.leading)
+
+                        let cleanedNotes = task.notes.trimmingCharacters(in: .whitespacesAndNewlines)
+                        if !cleanedNotes.isEmpty {
+                            Text(cleanedNotes)
+                                .font(.system(size: 12, weight: .medium, design: .rounded))
+                                .foregroundStyle(adaptiveRoutineSecondaryTextColor)
+                                .lineLimit(3)
+                                .multilineTextAlignment(.leading)
+                                .fixedSize(horizontal: false, vertical: true)
+                        }
+
+                        if isSkippedToday {
+                            HStack(spacing: 5) {
+                                Image("skipwavy").renderingMode(.template).resizable().scaledToFit()
+                                    .frame(width: 11, height: 11)
+                                Text("Skipped").font(.system(size: 10, weight: .bold, design: .rounded))
+                            }
+                            .foregroundStyle(adaptiveRoutineSecondaryTextColor)
+                        }
+                    }
+
+                    Spacer(minLength: 0)
                 }
+                .contentShape(Rectangle())
             }
-            
-            Spacer()
-            
+            .buttonStyle(.plain)
+
             HStack(spacing: 8) {
                 Button {
                     withAnimation(.spring(response: 0.28, dampingFraction: 0.78)) {
-                        if task.isCompleted { task.resetState() } else { task.markCompleted() }
-                        try? modelContext.save()
-                        WidgetCenter.shared.reloadTimelines(ofKind: "LureliaDueRoutinesWidget")
+                        if isCompletedToday {
+                            RoutineTaskManager.shared.resetStatus(task: task, context: modelContext)
+                        } else {
+                            RoutineTaskManager.shared.recordCompletion(task: task, context: modelContext)
+                        }
                     }
                 } label: {
                     ZStack {
-                        Circle().fill(task.isCompleted ? routineTint.opacity(0.18) : Color.clear)
+                        Circle().fill(isCompletedToday ? routineTint.opacity(0.18) : Color.clear)
                         Circle().strokeBorder(
-                            task.isSkipped ? adaptiveRoutineSecondaryTextColor : routineTint.opacity(0.75),
+                            isSkippedToday ? adaptiveRoutineSecondaryTextColor : routineTint.opacity(0.75),
                             lineWidth: 1.5
                         )
-                        if task.isCompleted {
+                        if isCompletedToday {
                             Image("checkwavy").renderingMode(.template).resizable().scaledToFit()
                                 .frame(width: 10, height: 10).foregroundStyle(routineTint)
                         }
@@ -809,11 +1155,10 @@ extension RoutineDetailView {
                 }
                 .buttonStyle(.plain)
                 
-                if task.isPending {
+                if isPendingToday {
                     Button {
                         withAnimation(.spring(response: 0.28, dampingFraction: 0.78)) {
-                            task.markSkipped(); try? modelContext.save()
-                            WidgetCenter.shared.reloadTimelines(ofKind: "LureliaDueRoutinesWidget")
+                            RoutineTaskManager.shared.recordSkip(task: task, context: modelContext)
                         }
                     } label: {
                         Image("skipwavy").renderingMode(.template).resizable().scaledToFit()
@@ -824,11 +1169,10 @@ extension RoutineDetailView {
                             .overlay(Circle().strokeBorder(LColors.glassBorder.opacity(0.75), lineWidth: 1))
                     }
                     .buttonStyle(.plain)
-                } else if task.isSkipped {
+                } else if isSkippedToday {
                     Button {
                         withAnimation(.spring(response: 0.28, dampingFraction: 0.78)) {
-                            task.resetState(); try? modelContext.save()
-                            WidgetCenter.shared.reloadTimelines(ofKind: "LureliaDueRoutinesWidget")
+                            RoutineTaskManager.shared.resetStatus(task: task, context: modelContext)
                         }
                     } label: {
                         Image("repeatfill").renderingMode(.template).resizable().scaledToFit()
@@ -894,7 +1238,7 @@ extension RoutineDetailView {
 
                                             if run.isActive {
                                                 activeRoutine = routine
-                                                WidgetCenter.shared.reloadTimelines(ofKind: "LureliaDueRoutinesWidget")
+                                                LureliaWidgetReloads.reloadAll()
                                             }
                                         } label: {
                                             Image("playwavy")
@@ -966,37 +1310,6 @@ extension RoutineDetailView {
         }
     }
     
-    // MARK: - Principles Card
-    
-    private var principlesCard: some View {
-        detailSectionCard(title: "Principles", icon: "sparkleprogress") {
-            VStack(spacing: 12) {
-                ForEach(routine.principles.indices, id: \.self) { index in
-                    HStack(spacing: 12) {
-                        ZStack {
-                            Circle()
-                                .fill(routineTint.opacity(0.18))
-                                .frame(width: 34, height: 34)
-                            Circle()
-                                .strokeBorder(routineTint.opacity(0.8), lineWidth: 1.5)
-                                .frame(width: 34, height: 34)
-                            Text("\(index + 1)")
-                                .font(.system(size: 12, weight: .black, design: .rounded))
-                                .foregroundStyle(adaptiveRoutineTextColor)
-                        }
-                        Text(routine.principles[index])
-                            .font(.system(size: 14, weight: .bold, design: .rounded))
-                            .foregroundStyle(adaptiveRoutineTextColor)
-                        Spacer()
-                    }
-                    if index < routine.principles.count - 1 {
-                        Divider().overlay(LColors.glassBorder)
-                    }
-                }
-            }
-        }
-    }
-
     private var historyCard: some View {
         detailSectionCard(title: "Run History", icon: "clock.arrow.circlepath") {
             if sortedRuns.isEmpty {
@@ -1020,6 +1333,37 @@ extension RoutineDetailView {
                                 }
                             }
                         if index < min(sortedRuns.count, 10) - 1 { divider }
+                    }
+                }
+            }
+        }
+    }
+
+    // MARK: - Principles Card
+
+    private var principlesCard: some View {
+        detailSectionCard(title: "Principles", icon: "sparkleprogress") {
+            VStack(spacing: 12) {
+                ForEach(routine.principles.indices, id: \.self) { index in
+                    HStack(spacing: 12) {
+                        ZStack {
+                            Circle()
+                                .fill(routineTint.opacity(0.18))
+                                .frame(width: 34, height: 34)
+                            Circle()
+                                .strokeBorder(routineTint.opacity(0.8), lineWidth: 1.5)
+                                .frame(width: 34, height: 34)
+                            Text("\(index + 1)")
+                                .font(.system(size: 12, weight: .black, design: .rounded))
+                                .foregroundStyle(adaptiveRoutineTextColor)
+                        }
+                        Text(routine.principles[index])
+                            .font(.system(size: 14, weight: .bold, design: .rounded))
+                            .foregroundStyle(adaptiveRoutineTextColor)
+                        Spacer()
+                    }
+                    if index < routine.principles.count - 1 {
+                        Divider().overlay(LColors.glassBorder)
                     }
                 }
             }
@@ -1100,11 +1444,15 @@ extension RoutineDetailView {
     private var completedRoutineTaskCount: Int {
         if routine.phasesEnabled {
             return routine.sortedPhases.reduce(0) { total, phase in
-                total + routine.tasksForPhase(phase).filter { $0.isCompleted }.count
+                total + routine.tasksForPhase(phase).filter {
+                    taskDayState($0) == .completed
+                }.count
             }
         }
 
-        return routine.sortedTasks.filter { $0.isCompleted }.count
+        return routine.sortedTasks.filter {
+            taskDayState($0) == .completed
+        }.count
     }
 
     private var routineTaskProgress: Double {
@@ -1242,7 +1590,8 @@ extension RoutineDetailView {
                     .lineLimit(1)
                     .minimumScaleFactor(0.75)
             }
-            .foregroundStyle(adaptiveRoutineTextColor)
+            .foregroundStyle(isPrimary ? routineFillTextColor : adaptiveRoutineTextColor)
+            .wcagContrastLift(on: routineTint, isActive: isPrimary)
             .frame(maxWidth: .infinity)
             .frame(height: 54)
             .background {
@@ -1402,7 +1751,51 @@ extension RoutineDetailView {
         modelContext.delete(run)
         routine.updatedAt = Date()
         try? modelContext.save()
-        WidgetCenter.shared.reloadTimelines(ofKind: "LureliaDueRoutinesWidget")
+        LureliaWidgetReloads.reloadAll()
+    }
+
+    private var offDayPickerRange: ClosedRange<Date> {
+        let calendar = Calendar.current
+        let start = calendar.startOfDay(for: Date())
+        let end = calendar.date(byAdding: .day, value: 89, to: start) ?? start
+        return start...end
+    }
+
+    private func normalizedOffDay(_ date: Date) -> Date {
+        Calendar.current.startOfDay(for: date)
+    }
+
+    private func addPendingOffDay() {
+        let result = routine.addOffDay(normalizedOffDay(pendingOffDayDate))
+
+        switch result {
+        case .valid:
+            offDayValidationMessage = nil
+            withAnimation(.spring(response: 0.28, dampingFraction: 0.82)) {
+                offDayPickerExpanded = false
+            }
+            routine.refreshCurrentContractStatusIfNeeded()
+            try? modelContext.save()
+            LureliaWidgetReloads.reloadAll()
+        case .duplicate:
+            offDayValidationMessage = "That off day is already selected."
+        case .backToBack:
+            offDayValidationMessage = "Off days cannot be back to back."
+        case .limitReached:
+            offDayValidationMessage = "Only 2 off days are allowed per 30 days."
+        }
+    }
+
+    private func offDayTitle(for date: Date) -> String {
+        if Calendar.current.isDateInToday(date) {
+            return "Today"
+        }
+
+        if Calendar.current.isDateInTomorrow(date) {
+            return "Tomorrow"
+        }
+
+        return date.formatted(.dateTime.weekday(.wide))
     }
     
     private func emptySectionText(_ text: String) -> some View {
@@ -1457,6 +1850,7 @@ private struct EditRoutinePhaseSheet: View {
     @Environment(\.dismiss) private var dismiss
     @Environment(\.modelContext) private var modelContext
 
+    @Bindable var routine: LureliaRoutine
     @Bindable var phase: LureliaRoutinePhase
     let routineTint: Color
 
@@ -1469,11 +1863,16 @@ private struct EditRoutinePhaseSheet: View {
     @State private var endHour: Int
     @State private var endMinute: Int
     @State private var showIconPicker = false
+    @State private var showAddTask = false
+    @State private var editingTask: LureliaRoutineTask?
+    @State private var taskPendingDeletion: LureliaRoutineTask?
 
     init(
+        routine: LureliaRoutine,
         phase: LureliaRoutinePhase,
         routineTint: Color
     ) {
+        self.routine = routine
         self.phase = phase
         self.routineTint = routineTint
 
@@ -1492,15 +1891,19 @@ private struct EditRoutinePhaseSheet: View {
     }
 
     private var adaptiveTextColor: Color {
-        routineTint.isLightColor ? .black.opacity(0.88) : .white
+        routineTint.wcagContrastingTextColor
     }
 
     private var adaptiveSecondaryTextColor: Color {
-        routineTint.isLightColor ? .black.opacity(0.62) : .white.opacity(0.72)
+        routineTint.wcagContrastingSecondaryTextColor
     }
 
-    private var sheetTextColor: Color { routineTint }
-    private var sheetSecondaryTextColor: Color { routineTint.opacity(0.72) }
+    private var sheetTextColor: Color { .white.opacity(0.92) }
+    private var sheetSecondaryTextColor: Color { .white.opacity(0.72) }
+    private var isPad: Bool { UIDevice.current.userInterfaceIdiom == .pad }
+    private var phaseTasks: [LureliaRoutineTask] {
+        routine.tasksForPhase(phase)
+    }
 
     var body: some View {
         NavigationStack {
@@ -1521,18 +1924,65 @@ private struct EditRoutinePhaseSheet: View {
 
                         scheduleCard
                         timeCard
+                        tasksCard
                         saveButton
                     }
                     .padding(.horizontal, 20)
                     .padding(.top, 18)
                     .padding(.bottom, 40)
+                    .routinePageWidthLocked()
                 }
+                .routinePageScrollClipped()
             }
             .navigationBarBackButtonHidden(true)
             .toolbar(.hidden, for: .navigationBar)
             .sheet(isPresented: $showIconPicker) {
                 IconPickerView(selectedIcon: $selectedIcon)
             }
+            .sheet(isPresented: Binding(
+                get: { !isPad && showAddTask },
+                set: { showAddTask = $0 }
+            )) {
+                addTaskSheet
+            }
+            .fullScreenCover(isPresented: Binding(
+                get: { isPad && showAddTask },
+                set: { showAddTask = $0 }
+            )) {
+                addTaskSheet
+            }
+            .routineTaskEditor(
+                isPad: isPad,
+                task: $editingTask,
+                routineTint: routineTint
+            )
+            .confirmationDialog(
+                "Remove Task?",
+                isPresented: Binding(
+                    get: { taskPendingDeletion != nil },
+                    set: { if !$0 { taskPendingDeletion = nil } }
+                ),
+                titleVisibility: .visible
+            ) {
+                Button("Remove Task", role: .destructive) {
+                    if let taskPendingDeletion {
+                        removeTask(taskPendingDeletion)
+                    }
+                    taskPendingDeletion = nil
+                }
+
+                Button("Cancel", role: .cancel) {
+                    taskPendingDeletion = nil
+                }
+            } message: {
+                Text("This removes the task from this phase and cancels its task notifications.")
+            }
+        }
+    }
+
+    private var addTaskSheet: some View {
+        AddCustomRoutineTaskView { draft in
+            addTask(from: draft)
         }
     }
 
@@ -1553,6 +2003,7 @@ private struct EditRoutinePhaseSheet: View {
                     .scaledToFit()
                     .frame(width: 17, height: 17)
                     .foregroundStyle(adaptiveTextColor)
+                    .wcagContrastLift(on: routineTint)
                     .frame(width: 40, height: 40)
                     .background(routineTint, in: Circle())
             }
@@ -1633,6 +2084,10 @@ private struct EditRoutinePhaseSheet: View {
                                         ? sheetTextColor
                                         : sheetSecondaryTextColor
                                     )
+                                    .wcagContrastLift(
+                                        on: routineTint,
+                                        isActive: selectedDays.contains(weekday)
+                                    )
                                     .frame(width: 32, height: 32)
                                     .background(
                                         selectedDays.contains(weekday)
@@ -1678,6 +2133,121 @@ private struct EditRoutinePhaseSheet: View {
         }
     }
 
+    private var tasksCard: some View {
+        fieldCard(title: "Tasks") {
+            VStack(spacing: 12) {
+                Button {
+                    showAddTask = true
+                } label: {
+                    HStack(spacing: 10) {
+                        Image("addwavy")
+                            .renderingMode(.template)
+                            .resizable()
+                            .scaledToFit()
+                            .frame(width: 18, height: 18)
+                            .foregroundStyle(routineTint)
+
+                        Text("Add Task")
+                            .font(.system(size: 14, weight: .black, design: .rounded))
+                            .foregroundStyle(sheetTextColor)
+
+                        Spacer()
+                    }
+                    .padding(.vertical, 10)
+                    .padding(.horizontal, 12)
+                    .background(routineTint.opacity(0.16), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+                    .overlay {
+                        RoundedRectangle(cornerRadius: 14, style: .continuous)
+                            .strokeBorder(routineTint.opacity(0.45), lineWidth: 1)
+                    }
+                }
+                .buttonStyle(.plain)
+
+                if phaseTasks.isEmpty {
+                    Text("No tasks in this phase yet.")
+                        .font(.system(size: 12, weight: .semibold, design: .rounded))
+                        .foregroundStyle(sheetSecondaryTextColor)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(.vertical, 4)
+                } else {
+                    VStack(spacing: 0) {
+                        ForEach(Array(phaseTasks.enumerated()), id: \.element.id) { index, task in
+                            phaseTaskRow(task)
+
+                            if index < phaseTasks.count - 1 {
+                                Divider().overlay(LColors.glassBorder)
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    private func phaseTaskRow(_ task: LureliaRoutineTask) -> some View {
+        HStack(spacing: 10) {
+            LureliaIconView(iconId: task.icon, size: 16)
+                .foregroundStyle(routineTint)
+                .frame(width: 30, height: 30)
+                .background(Color.white.opacity(0.08), in: Circle())
+                .overlay {
+                    Circle().strokeBorder(routineTint.opacity(0.45), lineWidth: 1)
+                }
+
+            VStack(alignment: .leading, spacing: 3) {
+                Text(task.title)
+                    .font(.system(size: 14, weight: .bold, design: .rounded))
+                    .foregroundStyle(sheetTextColor)
+                    .lineLimit(2)
+
+                let notes = task.notes.trimmingCharacters(in: .whitespacesAndNewlines)
+                if !notes.isEmpty {
+                    Text(notes)
+                        .font(.system(size: 11, weight: .medium, design: .rounded))
+                        .foregroundStyle(sheetSecondaryTextColor)
+                        .lineLimit(2)
+                }
+            }
+
+            Spacer(minLength: 0)
+
+            Button {
+                editingTask = task
+            } label: {
+                Image("settings")
+                    .renderingMode(.template)
+                    .resizable()
+                    .scaledToFit()
+                    .frame(width: 14, height: 14)
+                    .foregroundStyle(routineTint)
+                    .frame(width: 32, height: 32)
+                    .background(LColors.glassSurface2, in: Circle())
+                    .overlay {
+                        Circle().strokeBorder(LColors.glassBorder.opacity(0.75), lineWidth: 1)
+                    }
+            }
+            .buttonStyle(.plain)
+
+            Button {
+                taskPendingDeletion = task
+            } label: {
+                Image("trash")
+                    .renderingMode(.template)
+                    .resizable()
+                    .scaledToFit()
+                    .frame(width: 14, height: 14)
+                    .foregroundStyle(routineTint)
+                    .frame(width: 32, height: 32)
+                    .background(LColors.glassSurface2, in: Circle())
+                    .overlay {
+                        Circle().strokeBorder(LColors.glassBorder.opacity(0.75), lineWidth: 1)
+                    }
+            }
+            .buttonStyle(.plain)
+        }
+        .padding(.vertical, 10)
+    }
+
     private func fieldCard<Content: View>(
         title: String,
         @ViewBuilder content: () -> Content
@@ -1705,6 +2275,7 @@ private struct EditRoutinePhaseSheet: View {
             Text("Save Phase")
                 .font(.system(size: 15, weight: .black, design: .rounded))
                 .foregroundStyle(canSave ? adaptiveTextColor : .white.opacity(0.45))
+                .wcagContrastLift(on: routineTint, isActive: canSave)
                 .frame(maxWidth: .infinity)
                 .padding(.vertical, 14)
                 .background(
@@ -1728,8 +2299,141 @@ private struct EditRoutinePhaseSheet: View {
         phase.updatedAt = Date()
 
         try? modelContext.save()
-        WidgetCenter.shared.reloadTimelines(ofKind: "LureliaDueRoutinesWidget")
+        LureliaWidgetReloads.reloadAll()
         dismiss()
+    }
+
+    private func addTask(from draft: LureliaRoutineTaskDraft) {
+        let cleanTitle = draft.name.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !cleanTitle.isEmpty else { return }
+
+        let task = LureliaRoutineTask(
+            title: cleanTitle,
+            icon: draft.icon,
+            notes: draft.notes.trimmingCharacters(in: .whitespacesAndNewlines),
+            sortOrder: phaseTasks.count
+        )
+        task.phaseID = phase.id.uuidString
+        task.routine = routine
+
+        modelContext.insert(task)
+
+        if routine.tasks == nil {
+            routine.tasks = []
+        }
+        if routine.tasks?.contains(where: { $0.id == task.id }) != true {
+            routine.tasks?.append(task)
+        }
+
+        applyTaskDraft(draft, to: task)
+        normalizePhaseTaskOrder()
+        routine.updatedAt = Date()
+        phase.updatedAt = Date()
+
+        do {
+            try modelContext.save()
+        } catch {
+            print("🚨 [EditRoutinePhase] Add task save failed: \(error)")
+        }
+
+        RoutineTaskManager.shared.sync(task: task)
+        LureliaWidgetReloads.reloadAll()
+    }
+
+    private func removeTask(_ task: LureliaRoutineTask) {
+        RoutineTaskManager.shared.cancel(task: task)
+        routine.tasks = (routine.tasks ?? []).filter { $0.id != task.id }
+        modelContext.delete(task)
+        normalizePhaseTaskOrder()
+        routine.updatedAt = Date()
+        phase.updatedAt = Date()
+
+        do {
+            try modelContext.save()
+        } catch {
+            print("🚨 [EditRoutinePhase] Remove task save failed: \(error)")
+        }
+
+        LureliaWidgetReloads.reloadAll()
+    }
+
+    private func normalizePhaseTaskOrder() {
+        for (index, task) in phaseTasks.enumerated() {
+            task.sortOrder = index
+            task.updatedAt = Date()
+        }
+    }
+
+    private func applyTaskDraft(_ draft: LureliaRoutineTaskDraft, to task: LureliaRoutineTask) {
+        task.title = draft.name.trimmingCharacters(in: .whitespacesAndNewlines)
+        task.icon = draft.icon
+        task.notes = draft.notes.trimmingCharacters(in: .whitespacesAndNewlines)
+
+        task.context = draft.context.trimmingCharacters(in: .whitespacesAndNewlines)
+        task.purpose = draft.purpose.trimmingCharacters(in: .whitespacesAndNewlines)
+        task.motivation = draft.motivation.trimmingCharacters(in: .whitespacesAndNewlines)
+        task.trigger = draft.trigger.trimmingCharacters(in: .whitespacesAndNewlines)
+        task.triggerType = draft.triggerType
+        task.triggerReason = draft.triggerReason.trimmingCharacters(in: .whitespacesAndNewlines)
+        task.environment = draft.environment.trimmingCharacters(in: .whitespacesAndNewlines)
+        task.reward = draft.reward.trimmingCharacters(in: .whitespacesAndNewlines)
+        task.consequence = draft.consequence.trimmingCharacters(in: .whitespacesAndNewlines)
+        task.recoveryPlan = draft.recoveryPlan.trimmingCharacters(in: .whitespacesAndNewlines)
+
+        task.hasDueTime = draft.hasDueTime
+        task.dueHour = draft.dueHour
+        task.dueMinute = draft.dueMinute
+        task.estimatedDurationMinutes = max(0, draft.estimatedDurationMinutes)
+        task.repeatsOnDays = draft.repeatsOnDays
+        task.scheduledDays = draft.scheduledDays.sorted()
+
+        task.notificationsEnabled = draft.notificationsEnabled && draft.hasDueTime
+        task.notificationLeadMinutes = draft.notificationLeadMinutes.sorted()
+        task.alarmEnabled = draft.alarmEnabled && draft.hasDueTime
+        task.alarmSoundName = (draft.alarmEnabled && draft.hasDueTime) ? draft.alarmSoundName : nil
+
+        for (index, stepDraft) in draft.steps.enumerated()
+        where !stepDraft.title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            let step = LureliaRoutineTaskStep(
+                title: stepDraft.title.trimmingCharacters(in: .whitespacesAndNewlines),
+                isCompleted: stepDraft.isCompleted,
+                sortOrder: index
+            )
+            step.id = stepDraft.id
+            modelContext.insert(step)
+            step.task = task
+            if task.stepItems == nil { task.stepItems = [] }
+            task.stepItems?.append(step)
+        }
+
+        for (index, supplyDraft) in draft.supplies.enumerated()
+        where !supplyDraft.name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            let supply = LureliaRoutineTaskSupply(
+                name: supplyDraft.name.trimmingCharacters(in: .whitespacesAndNewlines),
+                sortOrder: index
+            )
+            supply.id = supplyDraft.id
+            modelContext.insert(supply)
+            supply.task = task
+            if task.supplyItems == nil { task.supplyItems = [] }
+            task.supplyItems?.append(supply)
+        }
+
+        for (index, obstacleDraft) in draft.obstacles.enumerated()
+        where !obstacleDraft.obstacle.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            let obstacle = LureliaRoutineTaskObstacle(
+                obstacle: obstacleDraft.obstacle.trimmingCharacters(in: .whitespacesAndNewlines),
+                solution: obstacleDraft.solution.trimmingCharacters(in: .whitespacesAndNewlines),
+                sortOrder: index
+            )
+            obstacle.id = obstacleDraft.id
+            modelContext.insert(obstacle)
+            obstacle.task = task
+            if task.obstacleItems == nil { task.obstacleItems = [] }
+            task.obstacleItems?.append(obstacle)
+        }
+
+        task.updatedAt = Date()
     }
 
     private func shortWeekdayLabel(for weekday: Int) -> String {
@@ -1767,11 +2471,15 @@ private struct EditRoutineTaskSheet: View {
     }
     
     private var adaptiveRoutineTextColor: Color {
-        routineTint.isLightColor ? .black.opacity(0.88) : .white
+        .white.opacity(0.92)
     }
     
     private var adaptiveRoutineSecondaryTextColor: Color {
-        routineTint.isLightColor ? .black.opacity(0.62) : .white.opacity(0.72)
+        .white.opacity(0.72)
+    }
+
+    private var routineFillTextColor: Color {
+        routineTint.wcagContrastingSolidTextColor
     }
 
     var body: some View {
@@ -1808,7 +2516,9 @@ private struct EditRoutineTaskSheet: View {
                     .padding(.horizontal, 20)
                     .padding(.top, 18)
                     .padding(.bottom, 40)
+                    .routinePageWidthLocked()
                 }
+                .routinePageScrollClipped()
             }
             .navigationBarBackButtonHidden(true)
             .toolbar(.hidden, for: .navigationBar)
@@ -1834,7 +2544,8 @@ private struct EditRoutineTaskSheet: View {
                     .resizable()
                     .scaledToFit()
                     .frame(width: 17, height: 17)
-                    .foregroundStyle(adaptiveRoutineTextColor)
+                    .foregroundStyle(routineFillTextColor)
+                    .wcagContrastLift(on: routineTint)
                     .frame(width: 40, height: 40)
                     .background(routineTint, in: Circle())
                     .overlay {
@@ -1919,7 +2630,8 @@ private struct EditRoutineTaskSheet: View {
         } label: {
             Text("Save Task")
                 .font(.system(size: 15, weight: .black, design: .rounded))
-                .foregroundStyle(canSave ? adaptiveRoutineTextColor : .white.opacity(0.45))
+                .foregroundStyle(canSave ? routineFillTextColor : .white.opacity(0.45))
+                .wcagContrastLift(on: routineTint, isActive: canSave)
                 .frame(maxWidth: .infinity)
                 .padding(.vertical, 14)
                 .background(
@@ -1939,7 +2651,7 @@ private struct EditRoutineTaskSheet: View {
 
         try? modelContext.save()
         dismiss()
-        WidgetCenter.shared.reloadTimelines(ofKind: "LureliaDueRoutinesWidget")
+        LureliaWidgetReloads.reloadAll()
     }
 }
 

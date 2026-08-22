@@ -2,6 +2,10 @@
 //  LureliaDueRoutinesWidget.swift
 //  Lurelia
 //
+//  Shows individual routine TASKS (aggregated across every routine) that
+//  are soon/due. Each task tile is tinted with its parent routine's color
+//  and uses the same custom-asset icon treatment as the rest of the app.
+//
 
 import WidgetKit
 import SwiftUI
@@ -9,352 +13,387 @@ import AppIntents
 import SwiftData
 import UIKit
 
-struct LureliaWidgetRoutineItem: Identifiable, Hashable {
-    let id: String // Maps to persistentID
-    let name: String
+// MARK: - Widget Item
+
+struct LureliaWidgetRoutineTaskItem: Identifiable, Hashable {
+    /// Unique per row (routine-scoped task ID + due time), to keep ForEach stable when
+    /// the same task appears at multiple times of day in future revisions.
+    let id: String
+    /// Exact action target. Bare `stableTaskID` is not unique across routines.
+    let actionID: String
+    let stableTaskID: String
+    let title: String
     let icon: String
-    let colorHex: String
-    let timeRange: String
-    let status: LureliaWidgetRoutineStatus
-    let phaseID: String?
-    let phaseName: String?
-    var isDone: Bool
+    let routineName: String
+    let routineColorHex: String
+    /// Actual due time — used for correct chronological sorting. Do NOT sort
+    /// on `dueTimeLabel`, which is a display string ("10:10 PM" would sort
+    /// before "3:45 PM" alphabetically).
+    let dueDate: Date
+    let dueTimeLabel: String
+    let status: LureliaWidgetTaskStatus
 }
 
-enum LureliaWidgetRoutineStatus: String, Hashable {
+enum LureliaWidgetTaskStatus: String, Hashable {
     case dueNow = "Due Now"
     case soon = "Soon"
 }
 
+// MARK: - Timeline
+
 struct LureliaDueRoutinesEntry: TimelineEntry {
     let date: Date
-    let routines: [LureliaWidgetRoutineItem]
+    let tasks: [LureliaWidgetRoutineTaskItem]
 }
 
-struct LureliaDueRoutinesProvider: TimelineProvider {
+// MARK: - Provider
+
+struct LureliaDueRoutinesProvider: AppIntentTimelineProvider {
+
     func placeholder(in context: Context) -> LureliaDueRoutinesEntry {
         LureliaDueRoutinesEntry(
             date: Date(),
-            routines: [
-                LureliaWidgetRoutineItem(
-                    id: UUID().uuidString,
-                    name: "Morning Ritual",
-                    icon: "sunrise.fill",
-                    colorHex: "#7d19f7",
-                    timeRange: "8AM \u{2013} 8:30AM",
-                    status: .dueNow,
-                    phaseID: nil,
-                    phaseName: "Shower Prep",
-                    isDone: false
+            tasks: [
+                LureliaWidgetRoutineTaskItem(
+                    id: "placeholder-1",
+                    actionID: "placeholder-1",
+                    stableTaskID: "placeholder-1",
+                    title: "Hydrate",
+                    icon: "glass",
+                    routineName: "Morning Ritual",
+                    routineColorHex: "#7d19f7",
+                    dueDate: Date(),
+                    dueTimeLabel: "8:00 AM",
+                    status: .dueNow
                 ),
-                LureliaWidgetRoutineItem(
-                    id: UUID().uuidString,
-                    name: "Evening Wind Down",
-                    icon: "moon.stars.fill",
-                    colorHex: "#03dbfc",
-                    timeRange: "9:30PM \u{2013} 10PM",
-                    status: .soon,
-                    phaseID: nil,
-                    phaseName: "Aftercare",
-                    isDone: false
+                LureliaWidgetRoutineTaskItem(
+                    id: "placeholder-2",
+                    actionID: "placeholder-2",
+                    stableTaskID: "placeholder-2",
+                    title: "Stretch",
+                    icon: "sparkle",
+                    routineName: "Morning Ritual",
+                    routineColorHex: "#7d19f7",
+                    dueDate: Date().addingTimeInterval(15 * 60),
+                    dueTimeLabel: "8:15 AM",
+                    status: .soon
+                ),
+                LureliaWidgetRoutineTaskItem(
+                    id: "placeholder-3",
+                    actionID: "placeholder-3",
+                    stableTaskID: "placeholder-3",
+                    title: "Wind Down",
+                    icon: "moonzs",
+                    routineName: "Evening Wind Down",
+                    routineColorHex: "#03dbfc",
+                    dueDate: Date().addingTimeInterval(3 * 3600),
+                    dueTimeLabel: "9:30 PM",
+                    status: .soon
                 )
             ]
         )
     }
 
-    func getSnapshot(in context: Context, completion: @escaping (LureliaDueRoutinesEntry) -> Void) {
-        let entry = fetchRoutines()
-        completion(entry)
+    func snapshot(
+        for configuration: LureliaContentWidgetConfigurationIntent,
+        in context: Context
+    ) async -> LureliaDueRoutinesEntry {
+        fetchTasks()
     }
 
-    func getTimeline(in context: Context, completion: @escaping (Timeline<LureliaDueRoutinesEntry>) -> Void) {
-        let entry = fetchRoutines()
-        let nextRefresh = Date().addingTimeInterval(15 * 60) // Refresh every 15 minutes
-        let timeline = Timeline(entries: [entry], policy: .after(nextRefresh))
-        completion(timeline)
+    func timeline(
+        for configuration: LureliaContentWidgetConfigurationIntent,
+        in context: Context
+    ) async -> Timeline<LureliaDueRoutinesEntry> {
+        let entry = fetchTasks()
+        // Refresh every 15 minutes — routine tasks slide from "soon" to "due
+        // now" and off the list on a short cadence.
+        let nextRefresh = Date().addingTimeInterval(15 * 60)
+        return Timeline(entries: [entry], policy: .after(nextRefresh))
     }
 
-    private func fetchRoutines() -> LureliaDueRoutinesEntry {
+    // MARK: - Fetch
+
+    private func fetchTasks() -> LureliaDueRoutinesEntry {
         do {
             let container = try LureliaWidgetShared.makeModelContainer()
             let context = ModelContext(container)
-            
-            let descriptor = FetchDescriptor<LureliaRoutine>(
-                sortBy: [SortDescriptor(\.sortOrder)]
-            )
-            
-            let allRoutines = try context.fetch(descriptor)
 
-            for routine in allRoutines {
-                print("Routine '\(routine.name)' icon = '\(routine.icon)'")
-                print("Exists = \(FileManager.default.fileExists(atPath: LureliaWidgetShared.iconURL(for: routine.icon).path))")
-                print("Path = \(LureliaWidgetShared.iconURL(for: routine.icon).path)")
+            let routines = try context.fetch(FetchDescriptor<LureliaRoutine>())
+
+            // Fetch tasks directly rather than via `routine.tasks` — the
+            // relationship can hand back a cached snapshot even on a fresh
+            // ModelContext, which is exactly the failure mode that made the
+            // widget keep hiding a task after the app un-completed it.
+            // Direct queries always read live state from disk.
+            let allTasks = try context.fetch(FetchDescriptor<LureliaRoutineTask>())
+            let allHistory = try context.fetch(FetchDescriptor<LureliaRoutineTaskHistoryEntry>())
+            let tasksByRoutineID = Dictionary(grouping: allTasks) { task in
+                task.routine?.persistentID ?? ""
             }
-            
+
             let now = Date()
-
-            let items = allRoutines
-                .filter { routine in
-                    let hasRoutineSchedule = routine.scheduleEnabled &&
-                        !routine.scheduledDays.isEmpty
-                    let hasPhaseSchedule = routine.phasesEnabled &&
-                        (routine.phases ?? []).contains { $0.scheduleEnabled && !$0.scheduledDays.isEmpty }
-                    return hasRoutineSchedule || hasPhaseSchedule
-                }
-                .compactMap { routine in
-                    routineWidgetItem(for: routine, now: now)
-                }
-                .sorted { left, right in
-                    if left.status == .dueNow && right.status != .dueNow { return true }
-                    if left.status != .dueNow && right.status == .dueNow { return false }
-                    return left.timeRange < right.timeRange
-                }
-            
-            return LureliaDueRoutinesEntry(date: Date(), routines: items)
-        } catch {
-            return LureliaDueRoutinesEntry(date: Date(), routines: [])
-        }
-    }
-    private func routineWidgetItem(
-        for routine: LureliaRoutine,
-        now: Date
-    ) -> LureliaWidgetRoutineItem? {
-        guard let startDate = nextRoutineStartDate(for: routine, now: now) else {
-            return nil
-        }
-
-        let endDate: Date
-        if routine.phasesEnabled {
             let calendar = Calendar.current
-            let weekday = calendar.component(.weekday, from: startDate)
-            let latestEnd = (routine.phases ?? [])
-                .filter { $0.scheduleEnabled && $0.scheduledDays.contains(weekday) }
-                .map { $0.endHour * 60 + $0.endMinute }
-                .max() ?? (routine.startHour * 60 + routine.startMinute + routine.durationMinutes)
-            var comps = calendar.dateComponents([.year, .month, .day], from: startDate)
-            comps.hour = latestEnd / 60
-            comps.minute = latestEnd % 60
-            comps.second = 0
-            endDate = calendar.date(from: comps) ?? startDate.addingTimeInterval(TimeInterval(routine.durationMinutes * 60))
-        } else {
-            endDate = startDate.addingTimeInterval(TimeInterval(routine.durationMinutes * 60))
-        }
-
-        let next24Hours = now.addingTimeInterval(24 * 60 * 60)
-
-        let isDueNow = isRoutineDueNow(startDate: startDate, endDate: endDate, now: now)
-        let isSoon = isRoutineSoon(startDate: startDate, now: now, limit: next24Hours)
-        let isScheduledTodayIncomplete = Calendar.current.isDateInToday(startDate)
-            && !routine.allTasksDone
-            && startDate <= now
-
-        guard isDueNow || isSoon || isScheduledTodayIncomplete else {
-            return nil
-        }
-
-        // Hide completed routines for today
-        if Calendar.current.isDateInToday(startDate) && routine.allTasksDone {
-            return nil
-        }
-
-        let status: LureliaWidgetRoutineStatus =
-            (isDueNow || isScheduledTodayIncomplete) ? .dueNow : .soon
-
-        let nextPhase = nextPhase(for: routine, now: now)
-
-        return LureliaWidgetRoutineItem(
-            id: routine.persistentID,
-            name: routine.name,
-            icon: routine.icon.isEmpty ? "sparkle" : routine.icon,
-            colorHex: routine.colorHex.isEmpty ? "#7d19f7" : routine.colorHex,
-            timeRange: widgetTimeRange(startDate: startDate, endDate: endDate),
-            status: status,
-            phaseID: nextPhase?.persistentID,
-            phaseName: cleanedPhaseName(nextPhase),
-            isDone: routine.allTasksDone
-        )
-    }
-
-    private func isRoutineDueNow(
-        startDate: Date,
-        endDate: Date,
-        now: Date
-    ) -> Bool {
-        startDate <= now && endDate >= now
-    }
-
-    private func isRoutineSoon(
-        startDate: Date,
-        now: Date,
-        limit: Date
-    ) -> Bool {
-        startDate > now && startDate <= limit
-    }
-
-    private func nextRoutineStartDate(
-        for routine: LureliaRoutine,
-        now: Date
-    ) -> Date? {
-        let calendar = Calendar.current
-        let todayWeekday = calendar.component(.weekday, from: now)
-
-        // Phase-based: check if any phase is scheduled for today
-        if routine.phasesEnabled {
-            let todayPhases = (routine.phases ?? [])
-                .filter { $0.scheduleEnabled && $0.scheduledDays.contains(todayWeekday) }
-                .sorted { $0.startHour * 60 + $0.startMinute < $1.startHour * 60 + $1.startMinute }
-
-            if let earliest = todayPhases.first {
-                var comps = calendar.dateComponents([.year, .month, .day], from: now)
-                comps.hour = earliest.startHour
-                comps.minute = earliest.startMinute
-                comps.second = 0
-                return calendar.date(from: comps)
-            }
-
-            // Check future days across all phases
-            let startOfToday = calendar.startOfDay(for: now)
-            for offset in 1...7 {
-                guard let candidateDay = calendar.date(byAdding: .day, value: offset, to: startOfToday) else { continue }
-                let weekday = calendar.component(.weekday, from: candidateDay)
-                let matchingPhases = (routine.phases ?? [])
-                    .filter { $0.scheduleEnabled && $0.scheduledDays.contains(weekday) }
-                    .sorted { $0.startHour * 60 + $0.startMinute < $1.startHour * 60 + $1.startMinute }
-                if let earliest = matchingPhases.first {
-                    var comps = calendar.dateComponents([.year, .month, .day], from: candidateDay)
-                    comps.hour = earliest.startHour
-                    comps.minute = earliest.startMinute
-                    comps.second = 0
-                    return calendar.date(from: comps)
-                }
-            }
-            return nil
-        }
-
-        // Routine-level schedule
-        if routine.scheduledDays.contains(todayWeekday) {
-            return routineDate(
-                for: routine,
-                dayOffset: 0,
+            let todayWeekday = calendar.component(.weekday, from: now)
+            let completedOrSkippedTaskIDsToday = todayHistoryTaskIDs(
+                from: allHistory,
                 now: now,
                 calendar: calendar
             )
+
+            var items: [LureliaWidgetRoutineTaskItem] = []
+            var didResetStaleTasks = false
+
+            for routine in routines {
+                // NO routine-level gate: a task with its own due time is
+                // valid regardless of whether the routine's schedule fields
+                // happen to include today. The task's due time and
+                // pending-state are the source of truth.
+                let colorHex = routine.colorHex.isEmpty ? "#7d19f7" : routine.colorHex
+                let routineTasks = tasksByRoutineID[routine.persistentID] ?? []
+
+                for task in routineTasks {
+                    let actionID = task.kanbanItemID
+
+                    if completedOrSkippedTaskIDsToday.contains(actionID)
+                        || taskHasTodayResolvedState(task, now: now, calendar: calendar)
+                    {
+                        continue
+                    }
+
+                    if resetStaleTaskStateIfNeeded(task, now: now, calendar: calendar) {
+                        didResetStaleTasks = true
+                    }
+
+                    guard task.isPending else { continue }
+
+                    guard let dueDate = taskDueDate(
+                        task: task,
+                        routine: routine,
+                        now: now,
+                        weekday: todayWeekday,
+                        calendar: calendar
+                    ) else {
+                        continue
+                    }
+
+                    let status = classify(dueDate: dueDate, now: now)
+                    guard let status else { continue }
+
+                    items.append(
+                        LureliaWidgetRoutineTaskItem(
+                            id: "\(actionID)::\(Int(dueDate.timeIntervalSince1970))",
+                            actionID: actionID,
+                            stableTaskID: task.stableTaskID,
+                            title: task.title.trimmingCharacters(in: .whitespacesAndNewlines),
+                            icon: task.icon.isEmpty ? "sparkle" : task.icon,
+                            routineName: routine.name,
+                            routineColorHex: colorHex,
+                            dueDate: dueDate,
+                            dueTimeLabel: dueTimeString(dueDate),
+                            status: status
+                        )
+                    )
+                }
+            }
+
+            if didResetStaleTasks {
+                try context.save()
+            }
+
+            // True chronological order. Do not group every Due Now item ahead
+            // of Soon items; the visible widget rows use prefix(maxItems), so
+            // status-first sorting can hide the actual next tasks by time.
+            let sorted = items.sorted { lhs, rhs in
+                return lhs.dueDate < rhs.dueDate
+            }
+
+            return LureliaDueRoutinesEntry(date: Date(), tasks: sorted)
+        } catch {
+            return LureliaDueRoutinesEntry(date: Date(), tasks: [])
+        }
+    }
+
+    // MARK: - Scheduling helpers
+
+    /// Best-effort due date for `task` on today. If the task has its own
+    /// due time, always honor it — the user set it, so it belongs on the
+    /// widget today. Only respect `repeatsOnDays + scheduledDays` when both
+    /// are actually populated. Falls back to the routine/phase start time
+    /// when the task has no explicit time.
+    private func taskDueDate(
+        task: LureliaRoutineTask,
+        routine: LureliaRoutine,
+        now: Date,
+        weekday: Int,
+        calendar: Calendar
+    ) -> Date? {
+        if task.hasDueTime {
+            // Only honor a per-task weekday restriction when the user has
+            // actually populated it — an empty `scheduledDays` array with
+            // `repeatsOnDays == true` is treated as "no restriction".
+            if task.repeatsOnDays
+                && !task.scheduledDays.isEmpty
+                && !task.scheduledDays.contains(weekday)
+            {
+                return nil
+            }
+            var comps = calendar.dateComponents([.year, .month, .day], from: now)
+            comps.hour = task.dueHour
+            comps.minute = task.dueMinute
+            comps.second = 0
+            return calendar.date(from: comps)
         }
 
-        let startOfToday = calendar.startOfDay(for: now)
+        // Task has no due time — fall back to the routine's start time IF
+        // the routine is scheduled today, or to the earliest phase start.
+        if routine.scheduleEnabled && routine.scheduledDays.contains(weekday) {
+            var comps = calendar.dateComponents([.year, .month, .day], from: now)
+            comps.hour = routine.startHour
+            comps.minute = routine.startMinute
+            comps.second = 0
+            return calendar.date(from: comps)
+        }
 
-        for offset in 1...7 {
-            guard let candidateDay = calendar.date(
-                byAdding: .day,
-                value: offset,
-                to: startOfToday
-            ) else {
-                continue
+        if routine.phasesEnabled {
+            let earliest = (routine.phases ?? [])
+                .filter { $0.scheduleEnabled && $0.scheduledDays.contains(weekday) }
+                .map { $0.startHour * 60 + $0.startMinute }
+                .min()
+            if let earliest {
+                var comps = calendar.dateComponents([.year, .month, .day], from: now)
+                comps.hour = earliest / 60
+                comps.minute = earliest % 60
+                comps.second = 0
+                return calendar.date(from: comps)
             }
+        }
 
-            let weekday = calendar.component(.weekday, from: candidateDay)
-
-            guard routine.scheduledDays.contains(weekday) else {
-                continue
-            }
-
-            var components = calendar.dateComponents([.year, .month, .day], from: candidateDay)
-            components.hour = routine.startHour
-            components.minute = routine.startMinute
-            components.second = 0
-
-            return calendar.date(from: components)
+        // Routine has no schedule at all — treat the task as due at the
+        // start of today rather than dropping it. Keeps unscheduled routine
+        // tasks visible instead of vanishing off the widget.
+        if !routine.scheduleEnabled && !routine.phasesEnabled {
+            return calendar.startOfDay(for: now)
         }
 
         return nil
     }
 
-    private func routineDate(
-        for routine: LureliaRoutine,
-        dayOffset: Int,
-        now: Date,
-        calendar: Calendar
-    ) -> Date {
-        let baseDay = calendar.date(
-            byAdding: .day,
-            value: dayOffset,
-            to: calendar.startOfDay(for: now)
-        ) ?? now
+    private func classify(dueDate: Date, now: Date) -> LureliaWidgetTaskStatus? {
+        // Anything scheduled for a day that isn't today is out.
+        guard Calendar.current.isDate(dueDate, inSameDayAs: now) else { return nil }
 
-        var components = calendar.dateComponents([.year, .month, .day], from: baseDay)
-        components.hour = routine.startHour
-        components.minute = routine.startMinute
-        components.second = 0
+        let delta = dueDate.timeIntervalSince(now)
 
-        return calendar.date(from: components) ?? now
+        // Past due → Due Now, and it stays Due Now until the task is
+        // completed or skipped (which drops it via the pending filter).
+        // No grace-window cutoff — a task the user didn't touch shouldn't
+        // silently disappear from the widget.
+        if delta <= 0 { return .dueNow }
+
+        // Match the Timeline widget: due/past tasks are Due Now, and anything
+        // later today is still Soon.
+        return .soon
     }
 
-    private func widgetTimeRange(startDate: Date, endDate: Date) -> String {
-        "\(compactTime(startDate)) \u{2013} \(compactTime(endDate))"
-    }
-
-    private func compactTime(_ date: Date) -> String {
+    private func dueTimeString(_ date: Date) -> String {
         let calendar = Calendar.current
         let hour = calendar.component(.hour, from: date)
         let minute = calendar.component(.minute, from: date)
         let isPM = hour >= 12
         let displayHour = hour == 0 ? 12 : (hour > 12 ? hour - 12 : hour)
         let meridiem = isPM ? "PM" : "AM"
-
         if minute == 0 {
-            return "\(displayHour)\(meridiem)"
-        } else {
-            return "\(displayHour):\(String(format: "%02d", minute))\(meridiem)"
+            return "\(displayHour) \(meridiem)"
         }
-    }
-    
-    private func nextPhase(
-        for routine: LureliaRoutine,
-        now: Date
-    ) -> LureliaRoutinePhase? {
-        guard routine.phasesEnabled else { return nil }
-
-        let phases = routine.sortedPhases
-        guard !phases.isEmpty else { return nil }
-
-        return phases.first { phase in
-            routine.tasksForPhase(phase).contains { $0.isPending }
-        }
+        return "\(displayHour):\(String(format: "%02d", minute)) \(meridiem)"
     }
 
-    private func cleanedPhaseName(_ phase: LureliaRoutinePhase?) -> String? {
-        let cleanedName = phase?.name.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-        return cleanedName.isEmpty ? nil : cleanedName
-    }
-
-    private func phaseDate(
-        hour: Int,
-        minute: Int,
+    @discardableResult
+    private func resetStaleTaskStateIfNeeded(
+        _ task: LureliaRoutineTask,
         now: Date,
         calendar: Calendar
-    ) -> Date {
-        var components = calendar.dateComponents([.year, .month, .day], from: now)
-        components.hour = hour
-        components.minute = minute
-        components.second = 0
+    ) -> Bool {
+        guard !task.isPending else { return false }
 
-        return calendar.date(from: components) ?? now
+        let completedToday = task.completedAt.map {
+            calendar.isDate($0, inSameDayAs: now)
+        } ?? false
+        let skippedToday = task.skippedAt.map {
+            calendar.isDate($0, inSameDayAs: now)
+        } ?? false
+
+        guard !completedToday && !skippedToday else { return false }
+
+        task.resetState()
+        task.routine?.updatedAt = now
+        return true
+    }
+
+    private func todayHistoryTaskIDs(
+        from history: [LureliaRoutineTaskHistoryEntry],
+        now: Date,
+        calendar: Calendar
+    ) -> Set<String> {
+        Set(
+            history.compactMap { entry in
+                guard calendar.isDate(entry.date, inSameDayAs: now),
+                      let task = entry.task
+                else { return nil }
+                return task.kanbanItemID
+            }
+        )
+    }
+
+    private func taskHasTodayResolvedState(
+        _ task: LureliaRoutineTask,
+        now: Date,
+        calendar: Calendar
+    ) -> Bool {
+        if let completedAt = task.completedAt,
+           calendar.isDate(completedAt, inSameDayAs: now) {
+            return true
+        }
+
+        if let skippedAt = task.skippedAt,
+           calendar.isDate(skippedAt, inSameDayAs: now) {
+            return true
+        }
+
+        return false
     }
 }
 
+// MARK: - View
+
 struct LureliaDueRoutinesWidgetView: View {
     let entry: LureliaDueRoutinesEntry
-    
+
+    @Environment(\.widgetFamily) private var family
+
+    /// Maximum number of task tiles per widget family. Sized to match the
+    /// Habits widget's larger tile dimensions — systemLarge fits 5.
+    private var maxItems: Int {
+        switch family {
+        case .systemSmall: return 2
+        case .systemMedium: return 3
+        case .systemLarge: return 5
+        case .systemExtraLarge: return 7
+        default: return 5
+        }
+    }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
             header
-            
-            if entry.routines.isEmpty {
+
+            if entry.tasks.isEmpty {
                 emptyState
             } else {
-                VStack(spacing: 8) {
-                    ForEach(entry.routines.prefix(5)) { routine in
-                        routineRow(routine)
+                VStack(spacing: 10) {
+                    ForEach(entry.tasks.prefix(maxItems)) { task in
+                        taskRow(task)
                     }
                 }
             }
@@ -365,7 +404,9 @@ struct LureliaDueRoutinesWidgetView: View {
             LureliaBackgroundAlt()
         }
     }
-    
+
+    // MARK: Header
+
     private var header: some View {
         HStack(spacing: 8) {
             if let uiImage = LureliaWidgetShared.widgetIcon(for: "repeatfill") {
@@ -376,143 +417,150 @@ struct LureliaDueRoutinesWidgetView: View {
                             .resizable()
                             .scaledToFit()
                     )
-                    .frame(width: 16, height: 16)
+                    .frame(width: 14, height: 14)
             } else {
-                Image(systemName: "arrow.clockwise")
+                Image(systemName: "checklist")
                     .resizable()
                     .scaledToFit()
-                    .frame(width: 16, height: 16)
+                    .frame(width: 14, height: 14)
                     .foregroundStyle(.white)
             }
-            
-            Text("My Routines")
-                .font(.system(size: 15, weight: .black, design: .rounded))
+
+            Text("Routine Tasks")
+                .font(.system(size: 14, weight: .black, design: .rounded))
                 .foregroundStyle(.white)
-            
+
             Spacer()
         }
     }
-    
+
     private var emptyState: some View {
-        Text("No routines scheduled")
-            .font(.system(size: 14, weight: .bold, design: .rounded))
+        Text("Nothing due soon")
+            .font(.system(size: 13, weight: .bold, design: .rounded))
             .foregroundStyle(.white.opacity(0.6))
             .frame(maxWidth: .infinity, alignment: .leading)
-            .padding(.top, 10)
+            .padding(.top, 6)
     }
-    
-    private func routineRow(_ routine: LureliaWidgetRoutineItem) -> some View {
-        let routineTint = Color(widgetHex: routine.colorHex)
 
-        return HStack(alignment: .top, spacing: 10) {
-            widgetIcon(routine.icon, tint: routineTint, size: 22)
-                .padding(.top, 2)
+    // MARK: Task row (tinted with parent routine's color)
 
-            VStack(alignment: .leading, spacing: 4) {
-                // Row 1: Name • Status
-                HStack(spacing: 5) {
-                    Text(routine.name)
-                        .font(.system(size: 12, weight: .bold, design: .rounded))
-                        .foregroundStyle(.white)
-                        .lineLimit(1)
+    private func taskRow(_ task: LureliaWidgetRoutineTaskItem) -> some View {
+        let tint = Color(widgetHex: task.routineColorHex)
 
-                    Text("•")
-                        .font(.system(size: 10, weight: .black, design: .rounded))
-                        .foregroundStyle(.white.opacity(0.35))
+        return HStack(alignment: .center, spacing: 7) {
+            // Task icon — same custom-asset masking treatment as the app.
+            widgetIcon(task.icon, tint: tint, size: 18)
+                .frame(width: 22, height: 22)
 
-                    routineStatusBadge(routine.status, tint: routineTint)
-                }
+            VStack(alignment: .leading, spacing: 1) {
+                Text(task.title.isEmpty ? "Untitled task" : task.title)
+                    .font(.system(size: 12, weight: .bold, design: .rounded))
+                    .foregroundStyle(.white)
+                    .lineLimit(1)
 
-                // Row 2: Phase • Time
-                HStack(spacing: 5) {
-                    if let phaseName = routine.phaseName {
-                        Text(phaseName)
-                            .font(.system(size: 10, weight: .bold, design: .rounded))
-                            .foregroundStyle(.white.opacity(0.62))
-                            .lineLimit(1)
-
-                        Text("•")
-                            .font(.system(size: 9, weight: .bold, design: .rounded))
-                            .foregroundStyle(.white.opacity(0.25))
-                    }
-
-                    Text(routine.timeRange)
-                        .font(.system(size: 10, weight: .bold, design: .rounded))
-                        .foregroundStyle(.white.opacity(0.55))
-                        .lineLimit(1)
-                }
+                Text(task.routineName)
+                    .font(.system(size: 9, weight: .bold, design: .rounded))
+                    .foregroundStyle(.white.opacity(0.55))
+                    .lineLimit(1)
             }
 
-            Spacer(minLength: 0)
+            Spacer(minLength: 4)
 
-            Button(intent: CompleteRoutineWidgetIntent(routineID: routine.id, phaseID: routine.phaseID)) {
-                ZStack {
-                    Circle()
-                        .fill(Color.clear)
-                        .frame(width: 22, height: 22)
-
-                    Circle()
-                        .strokeBorder(routineTint, lineWidth: 2)
-                        .frame(width: 22, height: 22)
-
-                    if routine.isDone {
-                        Circle()
-                            .fill(routineTint)
-                            .frame(width: 12, height: 12)
-                    }
-                }
-                .contentShape(Circle())
-            }
-            .buttonStyle(.plain)
-            .padding(.top, 2)
+            statusPill(task.status, tint: tint)
+            skipButton(for: task, tint: tint)
+            completeButton(for: task, tint: tint)
         }
-        .padding(.horizontal, 12)
-        .padding(.vertical, 10)
+        .padding(.horizontal, 10)
+        .padding(.vertical, 8)
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(
-            RoundedRectangle(cornerRadius: 14, style: .continuous)
-                .fill(routineTint.opacity(0.18))
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .fill(tint.opacity(0.18))
         )
         .overlay(
-            RoundedRectangle(cornerRadius: 14, style: .continuous)
-                .strokeBorder(routineTint.opacity(0.4), lineWidth: 1)
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .strokeBorder(tint.opacity(0.42), lineWidth: 1)
         )
     }
 
-    private func routineStatusBadge(
-        _ status: LureliaWidgetRoutineStatus,
-        tint: Color
-    ) -> some View {
-        Text(status.rawValue.uppercased())
+    private func statusPill(_ status: LureliaWidgetTaskStatus, tint: Color) -> some View {
+        // For Due Now the fill is the habit-color tint at near-full opacity,
+        // so the label needs to adapt to the tint's luminance — dark ink on
+        // a bright routine color, light ink on a dark one. Soon uses a
+        // dim translucent-white fill and stays plain white.
+        let foreground: Color = status == .dueNow
+            ? tint.adaptivePrimaryText
+            : .white
+
+        return Text(status.rawValue.uppercased())
             .font(.system(size: 8, weight: .black, design: .rounded))
-            .foregroundStyle(.white)
+            .foregroundStyle(foreground)
             .lineLimit(1)
-            .padding(.horizontal, 7)
+            .padding(.horizontal, 6)
             .padding(.vertical, 3)
             .background(
-                RoundedRectangle(cornerRadius: 8, style: .continuous)
+                RoundedRectangle(cornerRadius: 7, style: .continuous)
                     .fill(
                         status == .dueNow
-                        ? tint.opacity(0.95)
-                        : Color.white.opacity(0.16)
+                        ? tint.opacity(0.9)
+                        : Color.white.opacity(0.14)
                     )
             )
-            .overlay(
-                RoundedRectangle(cornerRadius: 8, style: .continuous)
-                    .strokeBorder(
-                        status == .dueNow
-                        ? Color.white.opacity(0.28)
-                        : tint.opacity(0.65),
-                        lineWidth: 1
-                    )
-            )
+    }
+
+    /// Skip button — bare `skipwavy` glyph tinted with the routine color.
+    /// Sized to match the completion circle's 24pt footprint so it still
+    /// aligns cleanly next to it.
+    private func skipButton(
+        for task: LureliaWidgetRoutineTaskItem,
+        tint: Color
+    ) -> some View {
+        Button(intent: SkipRoutineTaskWidgetIntent(taskID: task.actionID)) {
+            Group {
+                if let uiImage = LureliaWidgetShared.widgetIcon(for: "skipwavy") {
+                    tint
+                        .mask(
+                            Image(uiImage: uiImage)
+                                .renderingMode(.template)
+                                .resizable()
+                                .scaledToFit()
+                        )
+                } else {
+                    Image(systemName: "forward.fill")
+                        .resizable()
+                        .scaledToFit()
+                        .foregroundStyle(tint)
+                }
+            }
+            .frame(width: 24, height: 24)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel("Skip \(task.title)")
+    }
+
+    /// Tap-target circular completion button — outline only until the task
+    /// completes (completed tasks are filtered out of the timeline).
+    private func completeButton(
+        for task: LureliaWidgetRoutineTaskItem,
+        tint: Color
+    ) -> some View {
+        Button(intent: CompleteRoutineTaskWidgetIntent(taskID: task.actionID)) {
+            Circle()
+                .strokeBorder(tint, lineWidth: 1.6)
+                .background(Circle().fill(tint.opacity(0.16)))
+                .frame(width: 24, height: 24)
+                .contentShape(Circle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel("Complete \(task.title)")
     }
 
     @ViewBuilder
     private func widgetIcon(_ name: String, tint: Color, size: CGFloat) -> some View {
-        let trimmedName = name.trimmingCharacters(in: .whitespacesAndNewlines)
-        let iconName = trimmedName.isEmpty ? "sparkle" : trimmedName
-        
+        let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        let iconName = trimmed.isEmpty ? "sparkle" : trimmed
+
         if let uiImage = LureliaWidgetShared.widgetIcon(for: iconName) {
             tint
                 .mask(
@@ -532,7 +580,8 @@ struct LureliaDueRoutinesWidgetView: View {
     }
 }
 
-// Color Hex Extension Helper local scope fallback
+// MARK: - Color hex helper (local widget scope)
+
 extension Color {
     init(widgetHex: String) {
         let hex = widgetHex.trimmingCharacters(in: CharacterSet.alphanumerics.inverted)
@@ -540,11 +589,11 @@ extension Color {
         Scanner(string: hex).scanHexInt64(&int)
         let a, r, g, b: UInt64
         switch hex.count {
-        case 3: // RGB (12-bit)
+        case 3:
             (a, r, g, b) = (255, (int >> 8) * 17, (int >> 4 & 0xF) * 17, (int & 0xF) * 17)
-        case 6: // RGB (24-bit)
+        case 6:
             (a, r, g, b) = (255, int >> 16, int >> 8 & 0xFF, int & 0xFF)
-        case 8: // ARGB (32-bit)
+        case 8:
             (a, r, g, b) = (int >> 24, int >> 16 & 0xFF, int >> 8 & 0xFF, int & 0xFF)
         default:
             (a, r, g, b) = (1, 1, 1, 1)
@@ -559,18 +608,21 @@ extension Color {
     }
 }
 
+// MARK: - Widget
+
 struct LureliaDueRoutinesWidget: Widget {
     let kind = "LureliaDueRoutinesWidget"
 
     var body: some WidgetConfiguration {
-        StaticConfiguration(
+        AppIntentConfiguration(
             kind: kind,
+            intent: LureliaContentWidgetConfigurationIntent.self,
             provider: LureliaDueRoutinesProvider()
         ) { entry in
             LureliaDueRoutinesWidgetView(entry: entry)
         }
-        .configurationDisplayName("Routines Dashboard")
-        .description("Track and complete your active routines quickly.")
-        .supportedFamilies([.systemLarge])
+        .configurationDisplayName("Routine Tasks")
+        .description("See the routine tasks that are soon or due right now, tinted by their routine.")
+        .supportedFamilies([.systemMedium, .systemLarge])
     }
 }

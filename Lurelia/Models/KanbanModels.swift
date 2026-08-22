@@ -10,7 +10,29 @@ import SwiftData
 
 enum KanbanCardType: String, Codable {
     case reminder = "reminder"
+    case routine = "routine"
     case routineTask = "routineTask"
+    case habit = "habit"
+}
+
+extension LureliaHabit {
+    var kanbanItemID: String {
+        id.uuidString
+    }
+
+    func matchesKanbanItemID(_ itemID: String) -> Bool {
+        itemID == kanbanItemID
+    }
+}
+
+extension LureliaRoutineTask {
+    var kanbanItemID: String {
+        "\(routine?.persistentID ?? "unlinked")::\(stableTaskID)"
+    }
+
+    func matchesKanbanItemID(_ itemID: String) -> Bool {
+        itemID == kanbanItemID || itemID == stableTaskID
+    }
 }
 
 // MARK: - KanbanBoard

@@ -91,7 +91,9 @@ struct RoutineRunView: View {
                     }
                     .padding(.horizontal, 20)
                     .padding(.bottom, 40)
+                    .routinePageWidthLocked()
                 }
+                .routinePageScrollClipped()
                 
                 if allDone {
                     completionCard
@@ -332,9 +334,10 @@ extension RoutineRunView {
         }
         .foregroundStyle(
             filled
-            ? Color.white
+            ? routineTint.wcagContrastingSolidTextColor
             : LColors.textPrimary
         )
+        .wcagContrastLift(on: routineTint, isActive: filled)
         .frame(maxWidth: .infinity)
         .frame(height: 48)
         .background(
@@ -512,7 +515,8 @@ extension RoutineRunView {
                             design: .rounded
                         )
                     )
-                    .foregroundStyle(.white)
+                    .foregroundStyle(routineTint.wcagContrastingSolidTextColor)
+                    .wcagContrastLift(on: routineTint)
                     .frame(maxWidth: .infinity)
                     .frame(height: 50)
                     .background(

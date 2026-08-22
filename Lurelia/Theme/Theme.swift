@@ -34,10 +34,20 @@ enum LColors {
     static let warning = Color(lureliaHex: "#a92ce8")
     
     // Glass surfaces
+    // Neutral smoked-glass system surfaces
+    static let neutralPearl = Color(lureliaHex: "#E6E6EA")
+    static let neutralSilver = Color(lureliaHex: "#A8ABB3")
+    static let neutralSmoke = Color(lureliaHex: "#6E717A")
+    static let neutralGraphite = Color(lureliaHex: "#2A2D36")
+    static let neutralDeepGraphite = Color(lureliaHex: "#14161C")
+    static let neutralBase = Color(lureliaHex: "#07070A")
+    static let neutralGlassBase = Color(lureliaHex: "#171A21")
+    static let neutralGlassHighlight = Color(lureliaHex: "#E6E6EA")
+
     static let glassSurface = Color.white.opacity(0.06)
     static let glassSurface2 = Color.white.opacity(0.09)
-    static let glassBorder = Color.white.opacity(0.14)
-    static let glassBorderStrong = Color.white.opacity(0.22)
+    static let glassBorder = neutralSilver.opacity(0.14)
+    static let glassBorderStrong = neutralPearl.opacity(0.22)
     
     // Gradient colors
     static let gradientPurple = Color(lureliaHex: "#7d19f7")
@@ -58,20 +68,55 @@ enum LColors {
 // MARK: - Gradients
 
 enum LGradients {
+    /// Flat frosty white (both endpoints identical → renders as solid).
+    static let frosty = LinearGradient(
+        colors: [
+            Color.white.opacity(0.88),
+            Color.white.opacity(0.88)
+        ],
+        startPoint: .topLeading,
+        endPoint: .bottomTrailing
+    )
+
+    /// Flat frosty fill (both endpoints identical → renders as solid).
+    static let frostyFill = LinearGradient(
+        colors: [
+            Color.white.opacity(0.14),
+            Color.white.opacity(0.14)
+        ],
+        startPoint: .topLeading,
+        endPoint: .bottomTrailing
+    )
+
+    /// Flat frosty white (both endpoints identical → renders as solid).
     static let blue = LinearGradient(
-        colors: [LColors.gradientBlue, LColors.gradientPurple],
+        colors: [
+            Color.white.opacity(0.88),
+            Color.white.opacity(0.88)
+        ],
         startPoint: .topLeading,
         endPoint: .bottomTrailing
     )
     
+    /// FLAT frosty white. Kept as a `LinearGradient` for API compatibility
+    /// (many callers use `.foregroundStyle(LGradients.header)` /
+    /// `.background(LGradients.header, in: ...)`) but both endpoints are the
+    /// same color so it renders as a solid — NO visible gradient.
     static let header = LinearGradient(
-        colors: [LColors.gradientPurple, LColors.gradientBlue],
-        startPoint: .leading,
-        endPoint: .trailing
+        colors: [
+            Color.white.opacity(0.88),
+            Color.white.opacity(0.88)
+        ],
+        startPoint: .topLeading,
+        endPoint: .bottomTrailing
     )
     
+    /// Flat frosty white (both endpoints identical → renders as solid).
     static let tag = LinearGradient(
-        colors: [LColors.gradientPurple, LColors.gradientBlue],
+        colors: [
+            Color.white.opacity(0.85),
+            Color.white.opacity(0.85)
+        ],
         startPoint: .topLeading,
         endPoint: .bottomTrailing
     )
@@ -126,6 +171,49 @@ enum LSpacing {
 
 // MARK: - Color Extension
 
+// MARK: - Adaptive Text Helpers
+//
+// Any button/pill that fills with a bright frosty-white surface (e.g.
+// `LGradients.header`, `LGradients.blue`, `Color.white.opacity(0.85+)`) needs
+// dark text or its label disappears. These helpers pick a contrasting text
+// color based on the surface's WCAG luminance so authors can write, e.g.:
+//
+//     .foregroundStyle(surface.adaptivePrimaryText)
+//     .modifier(AdaptiveForeground(on: surface))
+//
+// The underlying calculation lives in `wcagContrastingTextColor` further down
+// this file — these are shorter, more discoverable aliases used across the
+// button/pill surfaces.
+
+extension Color {
+    /// Best-contrast "primary text" color for content placed *on top of this
+    /// surface color*. Returns near-black on a light surface, white on a dark
+    /// one. Prefer this over `LColors.textPrimary` whenever the container is
+    /// a frosty-white pill/button that would otherwise leave white text on a
+    /// nearly-white background.
+    var adaptivePrimaryText: Color { wcagContrastingTextColor }
+
+    /// Softer, still-readable secondary text color for a given surface.
+    /// Muted-black on light surfaces, muted-white on dark ones.
+    var adaptiveSecondaryText: Color { wcagContrastingSecondaryTextColor }
+}
+
+/// Convenience view modifier: `.adaptiveForeground(on: surface)` sets the
+/// foreground style to the WCAG-contrasting primary text color for `surface`.
+struct AdaptiveForeground: ViewModifier {
+    let surface: Color
+    func body(content: Content) -> some View {
+        content.foregroundStyle(surface.adaptivePrimaryText)
+    }
+}
+
+extension View {
+    /// Sugar for `.modifier(AdaptiveForeground(on: surface))`.
+    func adaptiveForeground(on surface: Color) -> some View {
+        modifier(AdaptiveForeground(surface: surface))
+    }
+}
+
 extension Color {
     init(lureliaHex hex: String) {
         let hex = hex.trimmingCharacters(in: CharacterSet.alphanumerics.inverted)
@@ -169,16 +257,86 @@ extension Color {
     }
 
     var isLightColor: Bool {
+        prefersDarkTextByWCAGContrast
+    }
+
+    var wcagContrastingTextColor: Color {
+        prefersDarkTextByWCAGContrast ? .black.opacity(0.88) : .white
+    }
+
+    var wcagContrastingSecondaryTextColor: Color {
+        prefersDarkTextByWCAGContrast ? .black.opacity(0.62) : .white.opacity(0.72)
+    }
+
+    var wcagContrastingSolidTextColor: Color {
+        prefersDarkTextByWCAGContrast ? .black : .white
+    }
+
+    var wcagTextLiftShadowColor: Color {
+        prefersDarkTextByWCAGContrast ? .white.opacity(0.32) : .black.opacity(0.55)
+    }
+
+    var wcagTextLiftShadowRadius: CGFloat {
+        prefersDarkTextByWCAGContrast ? 1.2 : 1.1
+    }
+
+    var wcagTextLiftShadowYOffset: CGFloat {
+        prefersDarkTextByWCAGContrast ? 0 : 1
+    }
+
+    private var prefersDarkTextByWCAGContrast: Bool {
+        let backgroundLuminance = wcagRelativeLuminance
+        let blackContrast = Color.wcagContrastRatio(backgroundLuminance, 0)
+        let whiteContrast = Color.wcagContrastRatio(backgroundLuminance, 1)
+        return blackContrast >= whiteContrast
+    }
+
+    private var wcagRelativeLuminance: Double {
+        let components = srgbComponentsForContrast
+        let red = Color.wcagLinearComponent(components.red)
+        let green = Color.wcagLinearComponent(components.green)
+        let blue = Color.wcagLinearComponent(components.blue)
+        return (0.2126 * red) + (0.7152 * green) + (0.0722 * blue)
+    }
+
+    private var srgbComponentsForContrast: (red: Double, green: Double, blue: Double) {
         let uiColor = UIColor(self)
         var red: CGFloat = 0
         var green: CGFloat = 0
         var blue: CGFloat = 0
         var alpha: CGFloat = 0
 
-        uiColor.getRed(&red, green: &green, blue: &blue, alpha: &alpha)
+        guard uiColor.getRed(&red, green: &green, blue: &blue, alpha: &alpha) else {
+            return (0, 0, 0)
+        }
 
-        let luminance = (0.299 * red) + (0.587 * green) + (0.114 * blue)
+        return (
+            Double(max(0, min(1, red))),
+            Double(max(0, min(1, green))),
+            Double(max(0, min(1, blue)))
+        )
+    }
 
-        return luminance > 0.62
+    private static func wcagLinearComponent(_ component: Double) -> Double {
+        component <= 0.03928
+            ? component / 12.92
+            : pow((component + 0.055) / 1.055, 2.4)
+    }
+
+    private static func wcagContrastRatio(_ firstLuminance: Double, _ secondLuminance: Double) -> Double {
+        let lighter = max(firstLuminance, secondLuminance)
+        let darker = min(firstLuminance, secondLuminance)
+        return (lighter + 0.05) / (darker + 0.05)
+    }
+}
+
+extension View {
+    func wcagContrastLift(on backgroundColor: Color, isActive: Bool = true) -> some View {
+        self.shadow(
+            color: isActive ? backgroundColor.wcagTextLiftShadowColor : .clear,
+            radius: isActive ? backgroundColor.wcagTextLiftShadowRadius : 0,
+            x: 0,
+            y: isActive ? backgroundColor.wcagTextLiftShadowYOffset : 0
+        )
     }
 }

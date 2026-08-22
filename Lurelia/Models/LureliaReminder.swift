@@ -5,6 +5,7 @@
 
 import Foundation
 import SwiftData
+import SwiftUI
 
 enum LureliaReminderKind: String, Codable, CaseIterable {
     case standalone = "Standalone"
@@ -31,6 +32,10 @@ final class LureliaReminder {
     var icon: String = "bellfill"
     var notes: String?
     var category: String = ""
+    /// User-selected reminder color. Drives every surface tied to this
+    /// reminder — cards, detail view, edit sheet, widget tile. Falls back
+    /// to a safe default so pre-existing reminders continue rendering.
+    var colorHex: String = "#7d19f7"
     
     var kind: LureliaReminderKind = LureliaReminderKind.standalone
     
@@ -57,6 +62,67 @@ final class LureliaReminder {
     var repeatEndsAt: Date?
     
     var notificationID: String = UUID().uuidString
+    var alarmID: String?
+    var alarmEnabled: Bool = false
+    var alarmDate: Date?
+    var alarmSoundName: String?
+    var alarmFireTimesStorage: String = "[]"
+    var alarmIDsStorage: String = "[]"
+
+    var alarmFireTimes: [String] {
+        get {
+            guard let data = alarmFireTimesStorage.data(using: .utf8),
+                  let decoded = try? JSONDecoder().decode([String].self, from: data) else { return [] }
+            return decoded
+        }
+        set {
+            guard let data = try? JSONEncoder().encode(newValue),
+                  let json = String(data: data, encoding: .utf8) else {
+                alarmFireTimesStorage = "[]"
+                return
+            }
+            alarmFireTimesStorage = json
+        }
+    }
+
+    var alarmIdentifiers: [LureliaReminderAlarmIdentifier] {
+        get {
+            guard let data = alarmIDsStorage.data(using: .utf8),
+                  let decoded = try? JSONDecoder().decode([LureliaReminderAlarmIdentifier].self, from: data) else { return [] }
+            return decoded
+        }
+        set {
+            guard let data = try? JSONEncoder().encode(newValue),
+                  let json = String(data: data, encoding: .utf8) else {
+                alarmIDsStorage = "[]"
+                return
+            }
+            alarmIDsStorage = json
+        }
+    }
+
+    func alarmUUID(forFireTime fireTime: String) -> UUID {
+        let normalizedFireTime = fireTime.trimmingCharacters(in: .whitespacesAndNewlines)
+        if let existing = alarmIdentifiers.first(where: { $0.fireTime == normalizedFireTime }) {
+            return existing.id
+        }
+
+        let newIdentifier = LureliaReminderAlarmIdentifier(fireTime: normalizedFireTime)
+        alarmIdentifiers.append(newIdentifier)
+        return newIdentifier.id
+    }
+
+    func keepAlarmIdentifiers(for fireTimes: [String]) {
+        let selectedFireTimes = Set(fireTimes.map { $0.trimmingCharacters(in: .whitespacesAndNewlines) })
+        var identifiers = alarmIdentifiers
+        let existingFireTimes = Set(identifiers.map(\.fireTime))
+
+        for fireTime in selectedFireTimes where !existingFireTimes.contains(fireTime) {
+            identifiers.append(LureliaReminderAlarmIdentifier(fireTime: fireTime))
+        }
+
+        alarmIdentifiers = identifiers.sorted { $0.fireTime < $1.fireTime }
+    }
 
     var duplicatePreventionKey: String {
         let trimmedTitle = title.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
@@ -382,6 +448,7 @@ final class LureliaReminder {
         self.repeatUnit = repeatUnit
         self.repeatInterval = max(1, repeatInterval)
         self.notificationID = UUID().uuidString
+        self.alarmEnabled = false
         let scheduledComponents = Calendar.current.dateComponents([.hour, .minute], from: scheduledDate)
         self.primaryHour = scheduledComponents.hour ?? -1
         self.primaryMinute = scheduledComponents.minute ?? -1
@@ -394,6 +461,13 @@ final class LureliaReminder {
 // MARK: - Streak Calculations
 
 extension LureliaReminder {
+
+    /// Resolved SwiftUI color for this reminder, with a safe fallback so
+    /// existing reminders without a user-selected color render correctly.
+    var color: Color {
+        let trimmed = colorHex.trimmingCharacters(in: .whitespacesAndNewlines)
+        return Color(lureliaHex: trimmed.isEmpty ? "#7d19f7" : trimmed)
+    }
 
     var hasLocation: Bool {
         locationLatitude != nil && locationLongitude != nil
@@ -463,6 +537,16 @@ struct LureliaAdditionalFireTime: Codable, Identifiable, Hashable {
         self.id = id
         self.hour = hour
         self.minute = minute
+    }
+}
+
+struct LureliaReminderAlarmIdentifier: Codable, Identifiable, Hashable {
+    var id: UUID
+    var fireTime: String
+
+    init(id: UUID = UUID(), fireTime: String) {
+        self.id = id
+        self.fireTime = fireTime
     }
 }
 

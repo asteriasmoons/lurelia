@@ -60,6 +60,7 @@ struct LureliaGradientStepper: View {
     @Binding var value: Int
     var range: ClosedRange<Int> = 1...999
     var step: Int = 1
+    var tint: Color?
 
     private var canDecrease: Bool {
         value - step >= range.lowerBound
@@ -71,15 +72,19 @@ struct LureliaGradientStepper: View {
 
     var body: some View {
         HStack(spacing: 14) {
-            VStack(alignment: .leading, spacing: 3) {
-                Text(title)
-                    .font(.system(size: 14, weight: .black, design: .rounded))
-                    .foregroundStyle(.white)
+            if !title.isEmpty || subtitle != nil {
+                VStack(alignment: .leading, spacing: 3) {
+                    if !title.isEmpty {
+                        Text(title)
+                            .font(.system(size: 14, weight: .black, design: .rounded))
+                            .foregroundStyle(.white)
+                    }
 
-                if let subtitle {
-                    Text(subtitle)
-                        .font(.system(size: 11, weight: .semibold, design: .rounded))
-                        .foregroundStyle(.white.opacity(0.5))
+                    if let subtitle {
+                        Text(subtitle)
+                            .font(.system(size: title.isEmpty ? 15 : 11, weight: .black, design: .rounded))
+                            .foregroundStyle(title.isEmpty ? .white.opacity(0.78) : .white.opacity(0.5))
+                    }
                 }
             }
 
@@ -101,10 +106,8 @@ struct LureliaGradientStepper: View {
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 11)
-        .background(.white.opacity(0.06), in: RoundedRectangle(cornerRadius: 16, style: .continuous))
-        .overlay {
-            RoundedRectangle(cornerRadius: 16, style: .continuous)
-                .strokeBorder(.white.opacity(0.08), lineWidth: 1)
+        .background {
+            LureliaNeutralGlassSurface(cornerRadius: 16, prominence: .lens)
         }
     }
 
@@ -113,71 +116,309 @@ struct LureliaGradientStepper: View {
         isEnabled: Bool,
         action: @escaping () -> Void
     ) -> some View {
-        Button(action: action) {
-            Image(icon)
-                .renderingMode(.template)
-                .resizable()
-                .scaledToFit()
-                .foregroundStyle(LGradients.header)
-                .opacity(isEnabled ? 1 : 0.28)
-                .frame(width: 22, height: 22)
-                .frame(width: 38, height: 38)
-                .background(.white.opacity(0.07), in: Circle())
-                .overlay {
-                    Circle()
-                        .strokeBorder(LGradients.header.opacity(isEnabled ? 0.85 : 0.25), lineWidth: 1)
-                }
-        }
-        .buttonStyle(.plain)
-        .disabled(!isEnabled)
+        LureliaRepeatingStepperButton(
+            icon: icon,
+            isEnabled: isEnabled,
+            tint: tint,
+            action: action
+        )
     }
+}
+
+private struct LureliaRepeatingStepperButton: View {
+    let icon: String
+    let isEnabled: Bool
+    let tint: Color?
+    let action: () -> Void
+
+    @State private var repeatTask: Task<Void, Never>?
+
+    private var activeStyle: AnyShapeStyle {
+        if let tint {
+            return AnyShapeStyle(tint)
+        }
+
+        return AnyShapeStyle(LGradients.header)
+    }
+
+    private var inactiveStyle: AnyShapeStyle {
+        AnyShapeStyle(Color.white.opacity(0.25))
+    }
+
+    private var activeBackground: Color {
+        if let tint {
+            return tint.opacity(0.13)
+        }
+
+        return .clear
+    }
+
+    private var activeBorderStyle: AnyShapeStyle {
+        if let tint {
+            return AnyShapeStyle(tint.opacity(isEnabled ? 0.50 : 0.20))
+        }
+
+        return AnyShapeStyle(LGradients.header.opacity(isEnabled ? 0.85 : 0.25))
+    }
+
+    var body: some View {
+        Image(icon)
+            .renderingMode(.template)
+            .resizable()
+            .scaledToFit()
+            .foregroundStyle(isEnabled ? activeStyle : inactiveStyle)
+            .opacity(isEnabled ? 1 : 0.28)
+            .frame(width: 22, height: 22)
+            .frame(width: 38, height: 38)
+            .background {
+                if tint == nil {
+                    LureliaNeutralGlassCircle(prominence: isEnabled ? .active : .lens)
+                } else {
+                    Circle()
+                        .fill(activeBackground)
+                }
+            }
+            .overlay {
+                if tint != nil {
+                    Circle()
+                        .strokeBorder(activeBorderStyle, lineWidth: 1)
+                }
+            }
+            .contentShape(Circle())
+            .gesture(
+                DragGesture(minimumDistance: 0)
+                    .onChanged { _ in
+                        startRepeating()
+                    }
+                    .onEnded { _ in
+                        stopRepeating()
+                    }
+            )
+            .accessibilityAddTraits(.isButton)
+            .accessibilityLabel(icon == "minuswavy" ? "Decrease" : "Increase")
+            .disabled(!isEnabled)
+            .onChange(of: isEnabled) { _, enabled in
+                if !enabled {
+                    stopRepeating()
+                }
+            }
+            .onDisappear {
+                stopRepeating()
+            }
+    }
+
+    private func startRepeating() {
+        guard isEnabled, repeatTask == nil else { return }
+
+        repeatTask = Task { @MainActor in
+            action()
+
+            try? await Task.sleep(nanoseconds: 360_000_000)
+
+            while !Task.isCancelled {
+                action()
+                try? await Task.sleep(nanoseconds: 80_000_000)
+            }
+        }
+    }
+
+    private func stopRepeating() {
+        repeatTask?.cancel()
+        repeatTask = nil
+    }
+
 }
 
 // MARK: - Glass Card
 
+enum LureliaNeutralGlassProminence {
+    case surface
+    case lens
+    case active
+}
+
+struct LureliaNeutralGlassSurface: View {
+    var cornerRadius: CGFloat = 24
+    var prominence: LureliaNeutralGlassProminence = .surface
+
+    @ViewBuilder
+    var body: some View {
+        if #available(iOS 26.0, *) {
+            nativeGlass
+        } else {
+            fallbackMaterial
+        }
+    }
+
+    @available(iOS 26.0, *)
+    @ViewBuilder
+    private var nativeGlass: some View {
+        ZStack {
+            RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
+                .fill(LColors.neutralGlassHighlight.opacity(nativeFrostOpacity))
+
+            Color.clear
+                .glassEffect(
+                    .regular.tint(LColors.neutralGlassHighlight.opacity(nativeTintOpacity)),
+                    in: .rect(cornerRadius: cornerRadius)
+                )
+        }
+    }
+
+    private var fallbackMaterial: some View {
+        RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
+            .fill(LColors.neutralGlassBase.opacity(fallbackOpacity))
+            .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: cornerRadius, style: .continuous))
+    }
+
+    private var fallbackOpacity: Double {
+        switch prominence {
+        case .surface: return 0.18
+        case .lens: return 0.16
+        case .active: return 0.20
+        }
+    }
+
+    private var nativeFrostOpacity: Double {
+        switch prominence {
+        case .surface: return 0.050
+        case .lens: return 0.055
+        case .active: return 0.065
+        }
+    }
+
+    private var nativeTintOpacity: Double {
+        switch prominence {
+        case .surface: return 0.040
+        case .lens: return 0.050
+        case .active: return 0.060
+        }
+    }
+}
+
+struct LureliaNeutralGlassCircle: View {
+    var prominence: LureliaNeutralGlassProminence = .surface
+
+    @ViewBuilder
+    var body: some View {
+        if #available(iOS 26.0, *) {
+            nativeGlass
+        } else {
+            fallbackMaterial
+        }
+    }
+
+    @available(iOS 26.0, *)
+    @ViewBuilder
+    private var nativeGlass: some View {
+        ZStack {
+            Circle()
+                .fill(LColors.neutralGlassHighlight.opacity(nativeFrostOpacity))
+
+            Color.clear
+                .glassEffect(
+                    .regular.tint(LColors.neutralGlassHighlight.opacity(nativeTintOpacity)),
+                    in: .circle
+                )
+        }
+    }
+
+    private var fallbackMaterial: some View {
+        Circle()
+            .fill(LColors.neutralGlassBase.opacity(fallbackOpacity))
+            .background(.ultraThinMaterial, in: Circle())
+    }
+
+    private var fallbackOpacity: Double {
+        switch prominence {
+        case .surface: return 0.18
+        case .lens: return 0.16
+        case .active: return 0.20
+        }
+    }
+
+    private var nativeFrostOpacity: Double {
+        switch prominence {
+        case .surface: return 0.050
+        case .lens: return 0.055
+        case .active: return 0.065
+        }
+    }
+
+    private var nativeTintOpacity: Double {
+        switch prominence {
+        case .surface: return 0.040
+        case .lens: return 0.050
+        case .active: return 0.060
+        }
+    }
+}
+
+extension View {
+    func lureliaNeutralGlass(
+        cornerRadius: CGFloat = 24,
+        prominence: LureliaNeutralGlassProminence = .surface
+    ) -> some View {
+        background {
+            LureliaNeutralGlassSurface(cornerRadius: cornerRadius, prominence: prominence)
+        }
+    }
+}
+
 struct GlassCard<Content: View>: View {
     var cornerRadius: CGFloat = 24
     var padding: CGFloat = LSpacing.cardPadding
+    var tint: Color?
     @ViewBuilder let content: Content
 
     var body: some View {
         content
             .padding(padding)
-            .background {
-                RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
-                    .fill(LColors.glassSurface2)
-                    .overlay {
-                        RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
-                            .fill(
-                                LinearGradient(
-                                    colors: [
-                                        LColors.gradientBlue.opacity(0.18),
-                                        LColors.gradientPurple.opacity(0.22),
-                                        Color.white.opacity(0.03)
-                                    ],
-                                    startPoint: .topLeading,
-                                    endPoint: .bottomTrailing
-                                )
-                            )
-                    }
-                    .overlay {
-                        RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
-                            .strokeBorder(
-                                LinearGradient(
-                                    colors: [
-                                        LColors.gradientBlue.opacity(0.92),
-                                        LColors.gradientPurple.opacity(0.92),
-                                        Color.white.opacity(0.38)
-                                    ],
-                                    startPoint: .topLeading,
-                                    endPoint: .bottomTrailing
-                                ),
-                                lineWidth: 1.05
-                            )
-                    }
-            }
-            .shadow(color: LColors.gradientBlue.opacity(0.18), radius: 16, y: 8)
-            .shadow(color: LColors.gradientPurple.opacity(0.14), radius: 18, y: 10)
+            .background { cardBackground }
+            .shadow(color: softShadowColor, radius: softShadowRadius, y: softShadowY)
+            .shadow(color: depthShadowColor, radius: depthShadowRadius, y: depthShadowY)
+    }
+
+    private var softShadowColor: Color {
+        tint?.opacity(0.10) ?? .clear
+    }
+
+    private var depthShadowColor: Color {
+        (tint ?? Color.clear).opacity(tint == nil ? 0 : 0.22)
+    }
+
+    private var softShadowRadius: CGFloat {
+        tint == nil ? 0 : 16
+    }
+
+    private var depthShadowRadius: CGFloat {
+        tint == nil ? 0 : 18
+    }
+
+    private var softShadowY: CGFloat {
+        tint == nil ? 0 : 8
+    }
+
+    private var depthShadowY: CGFloat {
+        tint == nil ? 0 : 10
+    }
+
+    @ViewBuilder
+    private var cardBackground: some View {
+        if let tint {
+            RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
+                .fill(Color.white.opacity(0.09))
+                .overlay {
+                    RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
+                        .fill(tint.opacity(0.24))
+                }
+                .overlay {
+                    RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
+                        .strokeBorder(tint.opacity(0.78), lineWidth: 1.05)
+                }
+        } else {
+            LureliaNeutralGlassSurface(cornerRadius: cornerRadius)
+        }
     }
 }
 
@@ -252,76 +493,18 @@ struct LureliaGradientTimeDrumPicker: View {
             }
             .padding(.horizontal, 14)
             .padding(.vertical, 10)
-            .background(
-                LColors.glassSurface2,
-                in: RoundedRectangle(cornerRadius: 16, style: .continuous)
-            )
-            .overlay(
-                RoundedRectangle(cornerRadius: 16, style: .continuous)
-                    .strokeBorder(
-                        LinearGradient(
-                            colors: [
-                                LColors.gradientBlue.opacity(0.45),
-                                LColors.gradientPurple.opacity(0.45)
-                            ],
-                            startPoint: .topLeading,
-                            endPoint: .bottomTrailing
-                        ),
-                        lineWidth: 1
-                    )
-            )
+            .background {
+                LureliaNeutralGlassSurface(cornerRadius: 16, prominence: .lens)
+            }
             
             ZStack {
-                RoundedRectangle(cornerRadius: 24, style: .continuous)
-                    .fill(LColors.glassSurface)
-                    .overlay(
-                        RoundedRectangle(cornerRadius: 24, style: .continuous)
-                            .fill(
-                                LinearGradient(
-                                    colors: [
-                                        LColors.gradientBlue.opacity(0.10),
-                                        LColors.gradientPurple.opacity(0.14),
-                                        Color.white.opacity(0.03)
-                                    ],
-                                    startPoint: .topLeading,
-                                    endPoint: .bottomTrailing
-                                )
-                            )
-                    )
-                    .overlay(
-                        RoundedRectangle(cornerRadius: 24, style: .continuous)
-                            .strokeBorder(LColors.glassBorder, lineWidth: 1)
-                    )
+                LureliaNeutralGlassSurface(cornerRadius: 24)
                 
                 VStack(spacing: 0) {
                     Spacer()
                     
-                    RoundedRectangle(cornerRadius: 12, style: .continuous)
-                        .fill(
-                            LinearGradient(
-                                colors: [
-                                    LColors.gradientBlue.opacity(0.20),
-                                    LColors.gradientPurple.opacity(0.20)
-                                ],
-                                startPoint: .leading,
-                                endPoint: .trailing
-                            )
-                        )
+                    LureliaNeutralGlassSurface(cornerRadius: 12, prominence: .active)
                         .frame(height: 38)
-                        .overlay(
-                            RoundedRectangle(cornerRadius: 12, style: .continuous)
-                                .strokeBorder(
-                                    LinearGradient(
-                                        colors: [
-                                            LColors.gradientBlue.opacity(0.55),
-                                            LColors.gradientPurple.opacity(0.55)
-                                        ],
-                                        startPoint: .leading,
-                                        endPoint: .trailing
-                                    ),
-                                    lineWidth: 1
-                                )
-                        )
                     
                     Spacer()
                 }
@@ -701,15 +884,11 @@ struct LureliaCompletionBanner: View {
 
             Text(message)
                 .font(.system(size: 14, weight: .bold, design: .rounded))
-                .foregroundStyle(.white)
+                .foregroundStyle(LColors.textPrimary)
         }
         .padding(.horizontal, 20)
         .padding(.vertical, 12)
-        .background(
-            Capsule()
-                .fill(LGradients.header)
-                .shadow(color: LColors.gradientPurple.opacity(0.4), radius: 16, y: 6)
-        )
+        .background { LureliaNeutralGlassSurface(cornerRadius: 999) }
         .opacity(isShowing ? 1 : 0)
         .offset(y: isShowing ? 0 : -20)
         .animation(.spring(response: 0.38, dampingFraction: 0.72), value: isShowing)
@@ -726,12 +905,888 @@ extension View {
     }
 }
 
+// MARK: - Gradient Date Drum Picker
+
+/// Three-drum (Month / Day / Year) date picker in the same gradient style
+/// as `LureliaGradientTimeDrumPicker`. Time-of-day components on the bound
+/// `Date` are preserved — only year/month/day are edited.
+struct LureliaGradientDateDrumPicker: View {
+    @Binding var date: Date
+
+    @State private var year: Int
+    @State private var month: Int
+    @State private var day: Int
+
+    private let calendar = Calendar.current
+
+    private let monthShortLabels = [
+        "Jan", "Feb", "Mar", "Apr", "May", "Jun",
+        "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"
+    ]
+
+    private static let referenceYear = Calendar.current.component(.year, from: Date())
+    private let yearRange: [Int] = Array((referenceYear - 5)...(referenceYear + 20))
+
+    init(date: Binding<Date>) {
+        self._date = date
+        let comps = Calendar.current.dateComponents([.year, .month, .day], from: date.wrappedValue)
+        _year = State(initialValue: comps.year ?? LureliaGradientDateDrumPicker.referenceYear)
+        _month = State(initialValue: comps.month ?? 1)
+        _day = State(initialValue: comps.day ?? 1)
+    }
+
+    private var daysInMonth: Int {
+        var comps = DateComponents()
+        comps.year = year
+        comps.month = month
+        guard let firstOfMonth = calendar.date(from: comps),
+              let range = calendar.range(of: .day, in: .month, for: firstOfMonth)
+        else { return 31 }
+        return range.count
+    }
+
+    private var monthBinding: Binding<Int> {
+        Binding(
+            get: { month },
+            set: { newValue in
+                let clamped = max(1, min(12, newValue))
+                guard month != clamped else { return }
+                month = clamped
+            }
+        )
+    }
+
+    private var dayBinding: Binding<Int> {
+        Binding(
+            get: { min(day, daysInMonth) },
+            set: { newValue in
+                let clamped = max(1, min(daysInMonth, newValue))
+                guard day != clamped else { return }
+                day = clamped
+            }
+        )
+    }
+
+    private var yearBinding: Binding<Int> {
+        Binding(
+            get: { year },
+            set: { newValue in
+                guard yearRange.contains(newValue), year != newValue else { return }
+                year = newValue
+            }
+        )
+    }
+
+    private var formattedPreview: String {
+        let formatter = DateFormatter()
+        formatter.dateFormat = "EEE, MMM d, yyyy"
+        return formatter.string(from: date)
+    }
+
+    var body: some View {
+        VStack(spacing: 12) {
+            HStack(spacing: 8) {
+                Image(systemName: "calendar")
+                    .font(.system(size: 13, weight: .bold))
+                    .foregroundStyle(LGradients.header)
+
+                Text(formattedPreview)
+                    .font(.system(size: 18, weight: .black, design: .rounded))
+                    .foregroundStyle(LColors.textPrimary)
+
+                Spacer()
+            }
+            .padding(.horizontal, 14)
+            .padding(.vertical, 10)
+            .background {
+                LureliaNeutralGlassSurface(cornerRadius: 16, prominence: .lens)
+            }
+
+            ZStack {
+                LureliaNeutralGlassSurface(cornerRadius: 24)
+
+                VStack(spacing: 0) {
+                    Spacer()
+
+                    LureliaNeutralGlassSurface(cornerRadius: 12, prominence: .active)
+                        .frame(height: 38)
+
+                    Spacer()
+                }
+                .padding(.horizontal, 12)
+
+                HStack(spacing: 6) {
+                    LureliaDrumPickerColumn(
+                        values: Array(1...12),
+                        labels: monthShortLabels,
+                        selection: monthBinding
+                    )
+                    .frame(maxWidth: .infinity)
+                    .frame(height: 120)
+                    .clipped()
+
+                    LureliaDrumPickerColumn(
+                        values: Array(1...daysInMonth),
+                        labels: Array(1...daysInMonth).map { "\($0)" },
+                        selection: dayBinding
+                    )
+                    .frame(maxWidth: .infinity)
+                    .frame(height: 120)
+                    .clipped()
+
+                    LureliaDrumPickerColumn(
+                        values: yearRange,
+                        labels: yearRange.map { "\($0)" },
+                        selection: yearBinding
+                    )
+                    .frame(maxWidth: .infinity)
+                    .frame(height: 120)
+                    .clipped()
+                }
+                .padding(.horizontal, 8)
+            }
+            .frame(height: 138)
+        }
+        .onChange(of: month) { _, _ in syncDateFromDrums() }
+        .onChange(of: day) { _, _ in syncDateFromDrums() }
+        .onChange(of: year) { _, _ in syncDateFromDrums() }
+        .onChange(of: date) { _, newValue in syncDrumsFromDate(newValue) }
+    }
+
+    private func syncDateFromDrums() {
+        var comps = DateComponents()
+        comps.year = year
+        comps.month = month
+        comps.day = min(day, daysInMonth)
+
+        let timeComps = calendar.dateComponents([.hour, .minute, .second], from: date)
+        comps.hour = timeComps.hour
+        comps.minute = timeComps.minute
+        comps.second = timeComps.second
+
+        guard let newDate = calendar.date(from: comps), newDate != date else { return }
+        date = newDate
+    }
+
+    private func syncDrumsFromDate(_ newDate: Date) {
+        let comps = calendar.dateComponents([.year, .month, .day], from: newDate)
+        if let newYear = comps.year, newYear != year { year = newYear }
+        if let newMonth = comps.month, newMonth != month { month = newMonth }
+        if let newDay = comps.day, newDay != day { day = newDay }
+    }
+}
+
+// MARK: - Tinted Date Drum Picker (Routine Tint)
+
+/// Three-drum (Month / Day / Year) date picker using a caller-provided tint.
+/// Time-of-day components on the bound `Date` are preserved.
+struct LureliaTintedDateDrumPicker: View {
+    @Binding var date: Date
+    let tint: Color
+    let minimumDate: Date?
+    let maximumDate: Date?
+
+    @State private var year: Int
+    @State private var month: Int
+    @State private var day: Int
+
+    private let calendar = Calendar.current
+
+    private let monthShortLabels = [
+        "Jan", "Feb", "Mar", "Apr", "May", "Jun",
+        "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"
+    ]
+
+    private static let referenceYear = Calendar.current.component(.year, from: Date())
+
+    init(
+        date: Binding<Date>,
+        tint: Color,
+        minimumDate: Date? = nil,
+        maximumDate: Date? = nil
+    ) {
+        self._date = date
+        self.tint = tint
+        self.minimumDate = minimumDate
+        self.maximumDate = maximumDate
+
+        let clampedDate = LureliaTintedDateDrumPicker.clamped(
+            date.wrappedValue,
+            minimumDate: minimumDate,
+            maximumDate: maximumDate,
+            calendar: .current
+        )
+        let comps = Calendar.current.dateComponents([.year, .month, .day], from: clampedDate)
+        _year = State(initialValue: comps.year ?? LureliaTintedDateDrumPicker.referenceYear)
+        _month = State(initialValue: comps.month ?? 1)
+        _day = State(initialValue: comps.day ?? 1)
+    }
+
+    private var minimumDay: Date? {
+        minimumDate.map { calendar.startOfDay(for: $0) }
+    }
+
+    private var maximumDay: Date? {
+        maximumDate.map { calendar.startOfDay(for: $0) }
+    }
+
+    private var yearRange: [Int] {
+        let minYear = minimumDay.map { calendar.component(.year, from: $0) } ?? Self.referenceYear - 5
+        let maxYear = maximumDay.map { calendar.component(.year, from: $0) } ?? Self.referenceYear + 20
+        return Array(minYear...max(minYear, maxYear))
+    }
+
+    private var monthValues: [Int] {
+        guard let firstYear = yearRange.first,
+              let lastYear = yearRange.last else {
+            return Array(1...12)
+        }
+
+        var lower = 1
+        var upper = 12
+
+        if year == firstYear,
+           let minimumDay {
+            lower = max(lower, calendar.component(.month, from: minimumDay))
+        }
+
+        if year == lastYear,
+           let maximumDay {
+            upper = min(upper, calendar.component(.month, from: maximumDay))
+        }
+
+        return lower <= upper ? Array(lower...upper) : [lower]
+    }
+
+    private var daysInMonth: Int {
+        var comps = DateComponents()
+        comps.year = clampedYear(year)
+        comps.month = clampedMonth(month)
+        guard let firstOfMonth = calendar.date(from: comps),
+              let range = calendar.range(of: .day, in: .month, for: firstOfMonth)
+        else { return 31 }
+        return range.count
+    }
+
+    private var dayValues: [Int] {
+        let selectedYear = clampedYear(year)
+        let selectedMonth = clampedMonth(month)
+
+        var lower = 1
+        var upper = daysInMonth
+
+        if let minimumDay,
+           calendar.component(.year, from: minimumDay) == selectedYear,
+           calendar.component(.month, from: minimumDay) == selectedMonth {
+            lower = max(lower, calendar.component(.day, from: minimumDay))
+        }
+
+        if let maximumDay,
+           calendar.component(.year, from: maximumDay) == selectedYear,
+           calendar.component(.month, from: maximumDay) == selectedMonth {
+            upper = min(upper, calendar.component(.day, from: maximumDay))
+        }
+
+        return lower <= upper ? Array(lower...upper) : [lower]
+    }
+
+    private var monthLabels: [String] {
+        monthValues.map { month in
+            monthShortLabels.indices.contains(month - 1) ? monthShortLabels[month - 1] : "\(month)"
+        }
+    }
+
+    private var yearBinding: Binding<Int> {
+        Binding(
+            get: { clampedYear(year) },
+            set: { newValue in
+                let clamped = clampedYear(newValue)
+                guard year != clamped else { return }
+                year = clamped
+            }
+        )
+    }
+
+    private var monthBinding: Binding<Int> {
+        Binding(
+            get: { clampedMonth(month) },
+            set: { newValue in
+                let clamped = clampedMonth(newValue)
+                guard month != clamped else { return }
+                month = clamped
+            }
+        )
+    }
+
+    private var dayBinding: Binding<Int> {
+        Binding(
+            get: { clampedDay(day) },
+            set: { newValue in
+                let clamped = clampedDay(newValue)
+                guard day != clamped else { return }
+                day = clamped
+            }
+        )
+    }
+
+    private var formattedPreview: String {
+        let formatter = DateFormatter()
+        formatter.dateFormat = "EEE, MMM d, yyyy"
+        return formatter.string(from: date)
+    }
+
+    var body: some View {
+        VStack(spacing: 12) {
+            HStack(spacing: 8) {
+                Image("starcal")
+                    .renderingMode(.template)
+                    .resizable()
+                    .scaledToFit()
+                    .frame(width: 13, height: 13)
+                    .foregroundStyle(tint)
+
+                Text(formattedPreview)
+                    .font(.system(size: 18, weight: .black, design: .rounded))
+                    .foregroundStyle(LColors.textPrimary)
+
+                Spacer()
+            }
+            .padding(.horizontal, 14)
+            .padding(.vertical, 10)
+            .background(
+                LColors.glassSurface2,
+                in: RoundedRectangle(cornerRadius: 16, style: .continuous)
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: 16, style: .continuous)
+                    .strokeBorder(tint.opacity(0.45), lineWidth: 1)
+            )
+
+            ZStack {
+                RoundedRectangle(cornerRadius: 24, style: .continuous)
+                    .fill(LColors.glassSurface)
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 24, style: .continuous)
+                            .fill(tint.opacity(0.08))
+                    )
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 24, style: .continuous)
+                            .strokeBorder(LColors.glassBorder, lineWidth: 1)
+                    )
+
+                VStack(spacing: 0) {
+                    Spacer()
+
+                    RoundedRectangle(cornerRadius: 12, style: .continuous)
+                        .fill(tint.opacity(0.20))
+                        .frame(height: 38)
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                                .strokeBorder(tint.opacity(0.55), lineWidth: 1)
+                        )
+
+                    Spacer()
+                }
+                .padding(.horizontal, 12)
+
+                HStack(spacing: 6) {
+                    LureliaDrumPickerColumn(
+                        values: monthValues,
+                        labels: monthLabels,
+                        selection: monthBinding
+                    )
+                    .frame(maxWidth: .infinity)
+                    .frame(height: 120)
+                    .clipped()
+
+                    LureliaDrumPickerColumn(
+                        values: dayValues,
+                        labels: dayValues.map { "\($0)" },
+                        selection: dayBinding
+                    )
+                    .frame(maxWidth: .infinity)
+                    .frame(height: 120)
+                    .clipped()
+
+                    LureliaDrumPickerColumn(
+                        values: yearRange,
+                        labels: yearRange.map { "\($0)" },
+                        selection: yearBinding
+                    )
+                    .frame(maxWidth: .infinity)
+                    .frame(height: 120)
+                    .clipped()
+                }
+                .padding(.horizontal, 8)
+            }
+            .frame(height: 138)
+        }
+        .onAppear {
+            syncDrumsFromDate(date)
+        }
+        .onChange(of: month) { _, _ in syncDateFromDrums() }
+        .onChange(of: day) { _, _ in syncDateFromDrums() }
+        .onChange(of: year) { _, _ in syncDateFromDrums() }
+        .onChange(of: date) { _, newValue in syncDrumsFromDate(newValue) }
+    }
+
+    private func clampedYear(_ value: Int) -> Int {
+        guard let first = yearRange.first,
+              let last = yearRange.last else {
+            return value
+        }
+        return max(first, min(last, value))
+    }
+
+    private func clampedMonth(_ value: Int) -> Int {
+        guard let first = monthValues.first,
+              let last = monthValues.last else {
+            return value
+        }
+        return max(first, min(last, value))
+    }
+
+    private func clampedDay(_ value: Int) -> Int {
+        guard let first = dayValues.first,
+              let last = dayValues.last else {
+            return value
+        }
+        return max(first, min(last, value))
+    }
+
+    private func syncDateFromDrums() {
+        let nextYear = clampedYear(year)
+        let nextMonth = clampedMonth(month)
+        let nextDay = clampedDay(day)
+
+        if year != nextYear { year = nextYear }
+        if month != nextMonth { month = nextMonth }
+        if day != nextDay { day = nextDay }
+
+        var comps = DateComponents()
+        comps.year = nextYear
+        comps.month = nextMonth
+        comps.day = nextDay
+
+        let timeComps = calendar.dateComponents([.hour, .minute, .second], from: date)
+        comps.hour = timeComps.hour
+        comps.minute = timeComps.minute
+        comps.second = timeComps.second
+
+        guard let newDate = calendar.date(from: comps) else { return }
+        let clampedDate = Self.clamped(
+            newDate,
+            minimumDate: minimumDate,
+            maximumDate: maximumDate,
+            calendar: calendar
+        )
+
+        guard clampedDate != date else { return }
+        date = clampedDate
+    }
+
+    private func syncDrumsFromDate(_ newDate: Date) {
+        let clampedDate = Self.clamped(
+            newDate,
+            minimumDate: minimumDate,
+            maximumDate: maximumDate,
+            calendar: calendar
+        )
+
+        if clampedDate != date {
+            date = clampedDate
+            return
+        }
+
+        let comps = calendar.dateComponents([.year, .month, .day], from: clampedDate)
+        if let newYear = comps.year, newYear != year { year = newYear }
+        if let newMonth = comps.month, newMonth != month { month = newMonth }
+        if let newDay = comps.day, newDay != day { day = newDay }
+    }
+
+    private static func clamped(
+        _ date: Date,
+        minimumDate: Date?,
+        maximumDate: Date?,
+        calendar: Calendar
+    ) -> Date {
+        let day = calendar.startOfDay(for: date)
+        let minimumDay = minimumDate.map { calendar.startOfDay(for: $0) }
+        let maximumDay = maximumDate.map { calendar.startOfDay(for: $0) }
+
+        if let minimumDay, day < minimumDay {
+            return minimumDay
+        }
+
+        if let maximumDay, day > maximumDay {
+            return maximumDay
+        }
+
+        return date
+    }
+}
+
+// MARK: - Gradient Dropdown
+
+/// Fully custom dropdown menu in the Lurelia style. Adapts to any size —
+/// place it inside a `GlassCard`, a `HStack`, or on its own. The row is a
+/// tappable label; tapping expands an inline options list below it (no
+/// system menu / picker UI). Set `allowsClear: true` to let the user reset
+/// to `nil`.
+struct LureliaGradientDropdown<Value: Hashable>: View {
+    var placeholder: String = "Select"
+    var options: [Value]
+    @Binding var selection: Value?
+    var allowsClear: Bool = false
+    var label: (Value) -> String
+
+    @State private var isExpanded = false
+
+    var body: some View {
+        VStack(spacing: 8) {
+            Button {
+                withAnimation(.spring(response: 0.32, dampingFraction: 0.85)) {
+                    isExpanded.toggle()
+                }
+            } label: {
+                HStack(spacing: 10) {
+                    Text(selection.map(label) ?? placeholder)
+                        .font(.system(size: 15, weight: .semibold, design: .rounded))
+                        .foregroundStyle(selection == nil ? Color.white.opacity(0.45) : Color.white)
+                        .lineLimit(1)
+
+                    Spacer(minLength: 8)
+
+                    Image("chevdown")
+                        .renderingMode(.template)
+                        .resizable()
+                        .scaledToFit()
+                        .frame(width: 14, height: 14)
+                        .foregroundStyle(LGradients.header)
+                        .rotationEffect(.degrees(isExpanded ? 180 : 0))
+                }
+                .padding(.horizontal, 14)
+                .padding(.vertical, 12)
+                .background {
+                    LureliaNeutralGlassSurface(
+                        cornerRadius: 14,
+                        prominence: isExpanded ? .active : .lens
+                    )
+                }
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+
+            if isExpanded {
+                VStack(spacing: 4) {
+                    if allowsClear && selection != nil {
+                        optionRow(nil, labelText: "Clear")
+                    }
+                    ForEach(Array(options.enumerated()), id: \.offset) { _, option in
+                        optionRow(option, labelText: label(option))
+                    }
+                }
+                .padding(6)
+                .background {
+                    LureliaNeutralGlassSurface(cornerRadius: 14)
+                }
+                .transition(.opacity.combined(with: .move(edge: .top)))
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func optionRow(_ value: Value?, labelText: String) -> some View {
+        let isSelected = value == selection
+        Button {
+            selection = value
+            withAnimation(.spring(response: 0.32, dampingFraction: 0.85)) {
+                isExpanded = false
+            }
+        } label: {
+            HStack(spacing: 10) {
+                Image(isSelected ? "checkwavy" : "chevright")
+                    .renderingMode(.template)
+                    .resizable()
+                    .scaledToFit()
+                    .frame(width: 14, height: 14)
+                    .foregroundStyle(
+                        isSelected
+                        ? AnyShapeStyle(LGradients.header)
+                        : AnyShapeStyle(Color.white.opacity(0.35))
+                    )
+
+                Text(labelText)
+                    .font(.system(size: 14, weight: .semibold, design: .rounded))
+                    .foregroundStyle(.white)
+                    .lineLimit(1)
+
+                Spacer(minLength: 4)
+            }
+            .padding(.horizontal, 10)
+            .padding(.vertical, 10)
+            .background {
+                if isSelected {
+                    LureliaNeutralGlassSurface(cornerRadius: 10, prominence: .active)
+                }
+            }
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+    }
+}
+
+// MARK: - Gradient Multi-Select Dropdown
+
+/// Multi-select twin of `LureliaGradientDropdown`. Same trigger + expanded
+/// panel styling — the only differences are that the trigger summarizes the
+/// current selection ("None", "Family", or "3 selected") and each option
+/// row toggles membership in a `Set<Value>` rather than replacing a single
+/// `Value?`. Options can be filtered per-render via `optionsFilter` so the
+/// caller can e.g. hide the currently-selected Primary Calendar without
+/// mutating the `options` array itself.
+struct LureliaGradientMultiSelectDropdown<Value: Hashable & Identifiable>: View {
+    let placeholder: String
+    let options: [Value]
+    @Binding var selection: Set<Value.ID>
+    var label: (Value) -> String
+    /// Return `true` to include the option in the panel. Default: include all.
+    var optionsFilter: (Value) -> Bool = { _ in true }
+
+    @State private var isExpanded = false
+
+    private var visibleOptions: [Value] {
+        options.filter(optionsFilter)
+    }
+
+    private var selectedOptions: [Value] {
+        visibleOptions.filter { selection.contains($0.id) }
+    }
+
+    private var triggerText: String {
+        let count = selectedOptions.count
+        switch count {
+        case 0: return placeholder
+        case 1: return label(selectedOptions[0])
+        default: return "\(count) selected"
+        }
+    }
+
+    private var triggerIsPlaceholder: Bool {
+        selectedOptions.isEmpty
+    }
+
+    var body: some View {
+        VStack(spacing: 8) {
+            Button {
+                withAnimation(.spring(response: 0.32, dampingFraction: 0.85)) {
+                    isExpanded.toggle()
+                }
+            } label: {
+                HStack(spacing: 10) {
+                    Text(triggerText)
+                        .font(.system(size: 15, weight: .semibold, design: .rounded))
+                        .foregroundStyle(triggerIsPlaceholder ? Color.white.opacity(0.45) : Color.white)
+                        .lineLimit(1)
+
+                    Spacer(minLength: 8)
+
+                    Image("chevdown")
+                        .renderingMode(.template)
+                        .resizable()
+                        .scaledToFit()
+                        .frame(width: 14, height: 14)
+                        .foregroundStyle(LGradients.header)
+                        .rotationEffect(.degrees(isExpanded ? 180 : 0))
+                }
+                .padding(.horizontal, 14)
+                .padding(.vertical, 12)
+                .background {
+                    LureliaNeutralGlassSurface(
+                        cornerRadius: 14,
+                        prominence: isExpanded ? .active : .lens
+                    )
+                }
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+
+            if isExpanded {
+                VStack(spacing: 4) {
+                    if visibleOptions.isEmpty {
+                        Text("No calendars available")
+                            .font(.system(size: 13, weight: .semibold, design: .rounded))
+                            .foregroundStyle(.white.opacity(0.55))
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .padding(.horizontal, 10)
+                            .padding(.vertical, 10)
+                    } else {
+                        ForEach(visibleOptions) { option in
+                            multiOptionRow(option, labelText: label(option))
+                        }
+                    }
+                }
+                .padding(6)
+                .background {
+                    LureliaNeutralGlassSurface(cornerRadius: 14)
+                }
+                .transition(.opacity.combined(with: .move(edge: .top)))
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func multiOptionRow(_ value: Value, labelText: String) -> some View {
+        let isSelected = selection.contains(value.id)
+        Button {
+            if isSelected {
+                selection.remove(value.id)
+            } else {
+                selection.insert(value.id)
+            }
+            // No auto-close: multi-select users usually want to pick more
+            // than one in a row.
+        } label: {
+            HStack(spacing: 10) {
+                Image(isSelected ? "checkwavy" : "chevright")
+                    .renderingMode(.template)
+                    .resizable()
+                    .scaledToFit()
+                    .frame(width: 14, height: 14)
+                    .foregroundStyle(
+                        isSelected
+                        ? AnyShapeStyle(LGradients.header)
+                        : AnyShapeStyle(Color.white.opacity(0.35))
+                    )
+
+                Text(labelText)
+                    .font(.system(size: 14, weight: .semibold, design: .rounded))
+                    .foregroundStyle(.white)
+                    .lineLimit(1)
+
+                Spacer(minLength: 4)
+            }
+            .padding(.horizontal, 10)
+            .padding(.vertical, 10)
+            .background {
+                if isSelected {
+                    LureliaNeutralGlassSurface(cornerRadius: 10, prominence: .active)
+                }
+            }
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+    }
+}
+
+// MARK: - Flow Layout
+
+/// Simple left-to-right flow layout: places variable-width subviews in a
+/// row, and wraps to a new row when the next one wouldn't fit. Used by the
+/// icon picker's category tabs so they wrap to new lines instead of
+/// scrolling horizontally.
+struct LureliaFlowLayout: Layout {
+    var spacing: CGFloat = 8
+    var lineSpacing: CGFloat = 8
+
+    func sizeThatFits(
+        proposal: ProposedViewSize,
+        subviews: Subviews,
+        cache: inout ()
+    ) -> CGSize {
+        let maxWidth = proposal.width ?? .infinity
+        var rowWidth: CGFloat = 0
+        var rowHeight: CGFloat = 0
+        var totalHeight: CGFloat = 0
+        var maxRowWidthSeen: CGFloat = 0
+        var isFirstInRow = true
+
+        for subview in subviews {
+            let size = subview.sizeThatFits(.unspecified)
+            let addWidth = isFirstInRow ? size.width : size.width + spacing
+
+            if !isFirstInRow, rowWidth + addWidth > maxWidth {
+                // wrap
+                totalHeight += rowHeight + lineSpacing
+                maxRowWidthSeen = max(maxRowWidthSeen, rowWidth)
+                rowWidth = size.width
+                rowHeight = size.height
+            } else {
+                rowWidth += addWidth
+                rowHeight = max(rowHeight, size.height)
+            }
+            isFirstInRow = false
+        }
+
+        totalHeight += rowHeight
+        maxRowWidthSeen = max(maxRowWidthSeen, rowWidth)
+        let width = maxWidth.isFinite ? maxWidth : maxRowWidthSeen
+        return CGSize(width: width, height: totalHeight)
+    }
+
+    func placeSubviews(
+        in bounds: CGRect,
+        proposal: ProposedViewSize,
+        subviews: Subviews,
+        cache: inout ()
+    ) {
+        let maxWidth = bounds.width
+        var x: CGFloat = bounds.minX
+        var y: CGFloat = bounds.minY
+        var rowHeight: CGFloat = 0
+        var isFirstInRow = true
+
+        for subview in subviews {
+            let size = subview.sizeThatFits(.unspecified)
+            let addWidth = isFirstInRow ? size.width : size.width + spacing
+
+            if !isFirstInRow, (x - bounds.minX) + addWidth > maxWidth {
+                // wrap
+                y += rowHeight + lineSpacing
+                x = bounds.minX
+                rowHeight = 0
+                isFirstInRow = true
+            }
+
+            if !isFirstInRow { x += spacing }
+
+            subview.place(
+                at: CGPoint(x: x, y: y),
+                anchor: .topLeading,
+                proposal: ProposedViewSize(width: size.width, height: size.height)
+            )
+            x += size.width
+            rowHeight = max(rowHeight, size.height)
+            isFirstInRow = false
+        }
+    }
+}
+
+// MARK: - Frosty Tile
+
+/// Companion to `GlassCard`. Used inside cards, grids, and compact groups as a
+/// quieter secondary glass lens.
+struct FrostyTile<Content: View>: View {
+    var cornerRadius: CGFloat = 18
+    var padding: CGFloat = 14
+    @ViewBuilder let content: Content
+
+    var body: some View {
+        content
+            .padding(padding)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background {
+                LureliaNeutralGlassSurface(cornerRadius: cornerRadius, prominence: .lens)
+            }
+    }
+}
+
 // MARK: - Preview
 
 #Preview {
     ZStack {
         LureliaBackground()
-        
+
         Text("Lurelia")
             .font(.system(size: 42, weight: .black, design: .rounded))
             .foregroundStyle(LGradients.header)

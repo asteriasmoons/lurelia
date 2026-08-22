@@ -133,7 +133,7 @@ struct CreateCustomTaskView: View {
                                     : selectedCategory
                                 )
                                 .font(.system(size: 12, weight: .semibold, design: .rounded))
-                                .foregroundStyle(LColors.gradientBlue)
+                                .foregroundStyle(Color.white.opacity(0.85))
                             }
                             
                             Spacer()
@@ -156,9 +156,9 @@ struct CreateCustomTaskView: View {
                             .strokeBorder(
                                 LinearGradient(
                                     colors: [
-                                        LColors.gradientBlue.opacity(0.95),
-                                        LColors.gradientPurple.opacity(0.95),
-                                        Color.white.opacity(0.55)
+                                        Color.white.opacity(0.85).opacity(0.95),
+                                        Color.white.opacity(0.85).opacity(0.95),
+                                        Color.white.opacity(0.85)
                                     ],
                                     startPoint: .topLeading,
                                     endPoint: .bottomTrailing
@@ -185,9 +185,9 @@ struct CreateCustomTaskView: View {
                                 .strokeBorder(
                                     LinearGradient(
                                         colors: [
-                                            LColors.gradientBlue.opacity(0.95),
-                                            LColors.gradientPurple.opacity(0.95),
-                                            Color.white.opacity(0.55)
+                                            Color.white.opacity(0.85).opacity(0.95),
+                                            Color.white.opacity(0.85).opacity(0.95),
+                                            Color.white.opacity(0.85)
                                         ],
                                         startPoint: .topLeading,
                                         endPoint: .bottomTrailing
@@ -216,9 +216,9 @@ struct CreateCustomTaskView: View {
                                 .strokeBorder(
                                     LinearGradient(
                                         colors: [
-                                            LColors.gradientBlue.opacity(0.95),
-                                            LColors.gradientPurple.opacity(0.95),
-                                            Color.white.opacity(0.55)
+                                            Color.white.opacity(0.85).opacity(0.95),
+                                            Color.white.opacity(0.85).opacity(0.95),
+                                            Color.white.opacity(0.85)
                                         ],
                                         startPoint: .topLeading,
                                         endPoint: .bottomTrailing
@@ -249,7 +249,7 @@ struct CreateCustomTaskView: View {
 
                             Stepper("", value: $coinReward, in: 0...100, step: 5)
                                 .labelsHidden()
-                                .tint(LColors.gradientBlue)
+                                .tint(Color.white.opacity(0.85))
                         }
                         .padding(14)
                         .background(.white.opacity(0.06))
@@ -259,9 +259,9 @@ struct CreateCustomTaskView: View {
                                 .strokeBorder(
                                     LinearGradient(
                                         colors: [
-                                            LColors.gradientBlue.opacity(0.95),
-                                            LColors.gradientPurple.opacity(0.95),
-                                            Color.white.opacity(0.55)
+                                            Color.white.opacity(0.85).opacity(0.95),
+                                            Color.white.opacity(0.85).opacity(0.95),
+                                            Color.white.opacity(0.85)
                                         ],
                                         startPoint: .topLeading,
                                         endPoint: .bottomTrailing
@@ -362,9 +362,9 @@ struct CreateCustomTaskView: View {
                                     .strokeBorder(
                                         LinearGradient(
                                             colors: [
-                                                LColors.gradientBlue.opacity(0.95),
-                                                LColors.gradientPurple.opacity(0.95),
-                                                Color.white.opacity(0.55)
+                                                Color.white.opacity(0.85).opacity(0.95),
+                                                Color.white.opacity(0.85).opacity(0.95),
+                                                Color.white.opacity(0.85)
                                             ],
                                             startPoint: .topLeading,
                                             endPoint: .bottomTrailing
@@ -412,7 +412,7 @@ struct CreateCustomTaskView: View {
                             Text("Create Task")
                                 .font(.system(size: 16, weight: .black, design: .rounded))
                         }
-                        .foregroundStyle(.white)
+                        .foregroundStyle(Color.white.adaptivePrimaryText)
                         .frame(maxWidth: .infinity)
                         .frame(height: 60)
                         .background(
@@ -424,7 +424,7 @@ struct CreateCustomTaskView: View {
                                 .stroke(Color.white.opacity(0.12), lineWidth: 1)
                         )
                         .shadow(
-                            color: LColors.gradientPurple.opacity(0.25),
+                            color: Color.white.opacity(0.85).opacity(0.25),
                             radius: 18,
                             y: 10
                         )

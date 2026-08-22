@@ -5,6 +5,7 @@
 
 import Foundation
 import SwiftData
+import SwiftUI
 
 // MARK: - Habit Frequency
 
@@ -57,6 +58,9 @@ final class LureliaHabit {
     var title: String = ""
     var details: String?
     var iconName: String?
+    /// User-selected color for this habit's visual identity across the Habits system.
+    /// Uses a safe fallback so pre-existing habits continue rendering correctly.
+    var colorHex: String = "#7d19f7"
     var daysPerWeek: Int = 7
     var activeWeekdaysStorage: String = "[1,2,3,4,5,6,7]"
     var timesPerDay: Int = 1
@@ -70,6 +74,12 @@ final class LureliaHabit {
     var _reminderEnabled: Bool = false
     var timesOfDayStorage: String = "[]"
     var reminderDaysOfWeekStorage: String = "[]"
+    var alarmID: String?
+    var alarmEnabled: Bool = false
+    var alarmDate: Date?
+    var alarmSoundName: String?
+    var alarmFireTimesStorage: String = "[]"
+    var alarmIDsStorage: String = "[]"
 
     // MARK: - Stats
 
@@ -167,6 +177,13 @@ extension LureliaHabit {
 
     var trimmedTitle: String {
         title.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    /// Resolved SwiftUI color for this habit, with a safe fallback so existing
+    /// habits without a user-selected color continue rendering correctly.
+    var color: Color {
+        let trimmed = colorHex.trimmingCharacters(in: .whitespacesAndNewlines)
+        return Color(lureliaHex: trimmed.isEmpty ? "#7d19f7" : trimmed)
     }
 
     // MARK: - Blueprint computed helpers
@@ -371,6 +388,72 @@ extension LureliaHabit {
 
     var isCompletedToday: Bool {
         todaysCount >= target
+    }
+
+    func log(on day: Date, calendar: Calendar = .current) -> LureliaHabitLog? {
+        let dayStart = calendar.startOfDay(for: day)
+        return (logs ?? []).first { calendar.isDate($0.dayStart, inSameDayAs: dayStart) }
+    }
+
+    func skip(on day: Date, calendar: Calendar = .current) -> LureliaHabitSkip? {
+        let dayStart = calendar.startOfDay(for: day)
+        return (skips ?? []).first { calendar.isDate($0.dayStart, inSameDayAs: dayStart) }
+    }
+
+    func count(on day: Date, calendar: Calendar = .current) -> Int {
+        log(on: day, calendar: calendar)?.count ?? 0
+    }
+
+    func progress(on day: Date, calendar: Calendar = .current) -> Double {
+        guard target > 0 else { return 0 }
+        return min(Double(count(on: day, calendar: calendar)) / Double(target), 1.0)
+    }
+
+    func isCompleted(on day: Date, calendar: Calendar = .current) -> Bool {
+        count(on: day, calendar: calendar) >= target
+    }
+
+    func isSkipped(on day: Date, calendar: Calendar = .current) -> Bool {
+        skip(on: day, calendar: calendar) != nil
+    }
+
+    func fireDates(on day: Date, calendar: Calendar = .current) -> [Date] {
+        guard !isArchived, isActiveOn(day, calendar: calendar) else { return [] }
+
+        let selectedTimes = decodedTimesOfDay
+            .map { $0.trimmingCharacters(in: CharacterSet.whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+
+        let timeStrings = selectedTimes.isEmpty ? ["09:00"] : selectedTimes
+        let dayStart = calendar.startOfDay(for: day)
+
+        return timeStrings.compactMap { timeString -> Date? in
+            let parts = timeString.split(separator: ":")
+            guard parts.count == 2,
+                  let hour = Int(parts[0]),
+                  let minute = Int(parts[1]),
+                  (0...23).contains(hour),
+                  (0...59).contains(minute)
+            else {
+                return nil
+            }
+
+            var components = calendar.dateComponents([.year, .month, .day], from: dayStart)
+            components.hour = hour
+            components.minute = minute
+            components.second = 0
+            return calendar.date(from: components)
+        }
+        .sorted()
+    }
+
+    private var decodedTimesOfDay: [String] {
+        guard let data = timesOfDayStorage.data(using: .utf8),
+              let decoded = try? JSONDecoder().decode([String].self, from: data) else {
+            return []
+        }
+
+        return decoded
     }
 
     // MARK: - Streak helpers

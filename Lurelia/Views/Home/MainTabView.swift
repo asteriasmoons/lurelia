@@ -15,18 +15,22 @@ enum LureliaTab: CaseIterable {
     case reminders
     case kantime
     case schedule
+    case events
     case habits
     case journeys
+    case routines
     case profile
 
     static let primaryTabs: [LureliaTab] = [
         .kantime,
-        .reminders,
+        .routines,
         .habits,
-        .journeys
+        .events
     ]
 
     static let overflowTabs: [LureliaTab] = [
+        .reminders,
+        .journeys,
         .profile,
         .schedule
     ]
@@ -39,10 +43,14 @@ enum LureliaTab: CaseIterable {
             return "bellfill"
         case .schedule:
             return "starnote"
+        case .events:
+            return "starmailing"
         case .habits:
-            return "clockfill"
+            return "repeatfill"
         case .journeys:
             return "journey"
+        case .routines:
+            return "clockwavy"
         case .profile:
             return "profilewavy"
         }
@@ -51,15 +59,19 @@ enum LureliaTab: CaseIterable {
     var title: String {
         switch self {
         case .kantime:
-            return "Kanban Timeline"
+            return "Timeline"
         case .reminders:
             return "Reminders"
         case .schedule:
-            return "Schedule"
+            return "Kanban"
+        case .events:
+            return "Events"
         case .habits:
             return "Habits"
         case .journeys:
             return "Journeys"
+        case .routines:
+            return "Routines"
         case .profile:
             return "Profile"
         }
@@ -117,10 +129,14 @@ struct MainTabView: View {
             RemindersView()
         case .schedule:
             ScheduleView()
+        case .events:
+            LureliaEventsView()
         case .habits:
             HabitsView()
         case .journeys:
             JourneysView()
+        case .routines:
+            RoutinesView()
         case .profile:
             ProfileView()
         }
@@ -160,34 +176,42 @@ struct LureliaTabBar: View {
                     .zIndex(1)
             }
 
-            HStack(spacing: 10) {
-                ForEach(leadingTabs, id: \.self) { tab in
-                    tabButton(tab)
-                }
-
-                centerAddButton
-
-                ForEach(trailingTabs, id: \.self) { tab in
-                    tabButton(tab)
-                }
-            }
+            tabControlRow
             .padding(.horizontal, 16)
             .padding(.top, 10)
             .padding(.bottom, 10)
             .background {
-                ZStack {
-                    Capsule(style: .continuous)
-                        .fill(LColors.bg.opacity(0.88))
-
-                    GlassCard(cornerRadius: 999, padding: 0) {
-                        Color.clear
-                    }
-                }
+                LureliaNeutralGlassSurface(cornerRadius: 999, prominence: .surface)
             }
             .padding(.horizontal, 18)
             .padding(.bottom, 42)
         }
         .animation(.spring(response: 0.3, dampingFraction: 0.82), value: showMoreTabs)
+    }
+
+    @ViewBuilder
+    private var tabControlRow: some View {
+        if #available(iOS 26.0, *) {
+            GlassEffectContainer(spacing: 10) {
+                tabControls
+            }
+        } else {
+            tabControls
+        }
+    }
+
+    private var tabControls: some View {
+        HStack(spacing: 10) {
+            ForEach(leadingTabs, id: \.self) { tab in
+                tabButton(tab)
+            }
+
+            centerAddButton
+
+            ForEach(trailingTabs, id: \.self) { tab in
+                tabButton(tab)
+            }
+        }
     }
 
     private func tabButton(_ tab: LureliaTab) -> some View {
@@ -202,7 +226,11 @@ struct LureliaTabBar: View {
             ZStack {
                 if isSelected {
                     Circle()
-                        .fill(LGradients.header.opacity(0.22))
+                        .fill(LColors.neutralGlassHighlight.opacity(0.045))
+                        .frame(width: 34, height: 34)
+
+                    Circle()
+                        .strokeBorder(LGradients.header.opacity(0.72), lineWidth: 1.2)
                         .frame(width: 34, height: 34)
                 }
 
@@ -231,16 +259,19 @@ struct LureliaTabBar: View {
         } label: {
             ZStack {
                 Circle()
-                    .fill(LGradients.header)
+                    .fill(LColors.neutralGlassHighlight.opacity(showMoreTabs ? 0.08 : 0.04))
+                    .overlay {
+                        Circle()
+                            .strokeBorder(LGradients.header.opacity(showMoreTabs ? 0.78 : 0.36), lineWidth: 1.2)
+                    }
                     .frame(width: 44, height: 44)
-                    .shadow(color: LColors.gradientBlue.opacity(0.35), radius: 10, x: 0, y: 5)
 
                 Image("addwavy")
                     .renderingMode(.template)
                     .resizable()
                     .scaledToFit()
                     .frame(width: 24, height: 24)
-                    .foregroundStyle(LColors.bg)
+                    .foregroundStyle(LGradients.header)
                     .rotationEffect(.degrees(showMoreTabs ? 45 : 0))
             }
             .frame(width: 54, height: 42)
@@ -252,6 +283,14 @@ struct LureliaTabBar: View {
     }
 
     private var moreTabsMenu: some View {
+        moreTabsContent
+        .padding(10)
+        .background {
+            LureliaNeutralGlassSurface(cornerRadius: 24)
+        }
+    }
+
+    private var moreTabsContent: some View {
         VStack(spacing: 6) {
             ForEach(overflowTabs, id: \.self) { tab in
                 Button {
@@ -260,78 +299,58 @@ struct LureliaTabBar: View {
                         showMoreTabs = false
                     }
                 } label: {
-                    HStack(spacing: 12) {
-                        Image(tab.icon)
-                            .renderingMode(.template)
-                            .resizable()
-                            .scaledToFit()
-                            .frame(width: 18, height: 18)
-                            .foregroundStyle(
-                                selectedTab == tab
-                                ? AnyShapeStyle(LGradients.header)
-                                : AnyShapeStyle(LColors.textSecondary)
-                            )
-                            .frame(width: 34, height: 34)
-                            .background(
-                                selectedTab == tab ? LColors.glassSurface2 : LColors.glassSurface,
-                                in: Circle()
-                            )
-                            .overlay(
-                                Circle()
-                                    .strokeBorder(LColors.glassBorder, lineWidth: 1)
-                            )
-
-                        Text(tab.title)
-                            .font(.system(size: 14, weight: .bold, design: .rounded))
-                            .foregroundStyle(LColors.textPrimary)
-
-                        Spacer()
-                    }
-                    .padding(.vertical, 8)
-                    .padding(.horizontal, 10)
-                    .background(
-                        selectedTab == tab ? LColors.glassSurface2.opacity(0.75) : Color.clear,
-                        in: RoundedRectangle(cornerRadius: 15, style: .continuous)
-                    )
+                    moreTabRow(tab)
                 }
                 .buttonStyle(.plain)
             }
         }
-        .padding(10)
-        .background {
-            RoundedRectangle(cornerRadius: 24, style: .continuous)
-                .fill(LColors.bg.opacity(0.96))
-                .overlay(
-                    RoundedRectangle(cornerRadius: 24, style: .continuous)
-                        .fill(
-                            LinearGradient(
-                                colors: [
-                                    LColors.gradientBlue.opacity(0.10),
-                                    LColors.gradientPurple.opacity(0.08),
-                                    Color.white.opacity(0.03)
-                                ],
-                                startPoint: .topLeading,
-                                endPoint: .bottomTrailing
-                            )
-                        )
+    }
+
+    private func moreTabRow(_ tab: LureliaTab) -> some View {
+        HStack(spacing: 12) {
+            Image(tab.icon)
+                .renderingMode(.template)
+                .resizable()
+                .scaledToFit()
+                .frame(width: 18, height: 18)
+                .foregroundStyle(
+                    selectedTab == tab
+                    ? AnyShapeStyle(LGradients.header)
+                    : AnyShapeStyle(Color.white.opacity(0.58))
                 )
-                .overlay(
-                    RoundedRectangle(cornerRadius: 24, style: .continuous)
-                        .strokeBorder(
-                            LinearGradient(
-                                colors: [
-                                    LColors.gradientBlue.opacity(0.75),
-                                    LColors.gradientPurple.opacity(0.55),
-                                    Color.white.opacity(0.25)
-                                ],
-                                startPoint: .topLeading,
-                                endPoint: .bottomTrailing
-                            ),
-                            lineWidth: 1.4
-                        )
-                )
+                .frame(width: 34, height: 34)
+                .background {
+                    Circle()
+                        .fill(LColors.neutralGlassHighlight.opacity(selectedTab == tab ? 0.055 : 0.035))
+                        .overlay {
+                            Circle()
+                                .strokeBorder(
+                                    selectedTab == tab
+                                    ? AnyShapeStyle(LGradients.header.opacity(0.52))
+                                    : AnyShapeStyle(LColors.neutralGlassHighlight.opacity(0.14)),
+                                    lineWidth: 1
+                                )
+                        }
+                    }
+
+            Text(tab.title)
+                .font(.system(size: 14, weight: .bold, design: .rounded))
+                .foregroundStyle(LColors.textPrimary)
+
+            Spacer()
         }
-        .shadow(color: .black.opacity(0.24), radius: 22, x: 0, y: 12)
+        .padding(.vertical, 8)
+        .padding(.horizontal, 10)
+        .background {
+            if selectedTab == tab {
+                RoundedRectangle(cornerRadius: 15, style: .continuous)
+                    .fill(LColors.neutralGlassHighlight.opacity(0.045))
+                    .overlay {
+                        RoundedRectangle(cornerRadius: 15, style: .continuous)
+                            .strokeBorder(LColors.neutralGlassHighlight.opacity(0.18), lineWidth: 1)
+                    }
+            }
+        }
     }
 }
 
@@ -353,8 +372,8 @@ struct PlaceholderTabView: View {
                         .foregroundStyle(
                             LinearGradient(
                                 colors: [
-                                    LColors.gradientBlue,
-                                    LColors.gradientPurple
+                                    Color.white.opacity(0.85),
+                                    Color.white.opacity(0.85)
                                 ],
                                 startPoint: .topLeading,
                                 endPoint: .bottomTrailing
@@ -369,8 +388,8 @@ struct PlaceholderTabView: View {
                         .foregroundStyle(
                             LinearGradient(
                                 colors: [
-                                    LColors.gradientBlue,
-                                    LColors.gradientPurple
+                                    Color.white.opacity(0.85),
+                                    Color.white.opacity(0.85)
                                 ],
                                 startPoint: .topLeading,
                                 endPoint: .bottomTrailing

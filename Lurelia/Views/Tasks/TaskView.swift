@@ -133,14 +133,14 @@ struct TasksView: View {
                             Text(tasksByCategory.isEmpty ? "Choose Tasks From Bank" : "Add From Task Bank")
                                 .font(.system(size: 14, weight: .semibold, design: .rounded))
                         }
-                        .foregroundStyle(LColors.gradientPurple)
+                        .foregroundStyle(Color.white.opacity(0.85))
                         .frame(maxWidth: .infinity)
                         .padding(.vertical, 12)
-                        .background(LColors.gradientPurple.opacity(0.1))
+                        .background(Color.white.opacity(0.85).opacity(0.1))
                         .clipShape(RoundedRectangle(cornerRadius: 12))
                         .overlay(
                             RoundedRectangle(cornerRadius: 12)
-                                .stroke(LColors.gradientPurple.opacity(0.25), lineWidth: 1)
+                                .stroke(Color.white.opacity(0.85).opacity(0.25), lineWidth: 1)
                         )
                     }
                     .buttonStyle(.plain)
@@ -362,7 +362,7 @@ struct LureliaEmptyTasksView: View {
                 } label: {
                     Text("Choose From Task Bank")
                         .font(.system(size: 15, weight: .bold, design: .rounded))
-                        .foregroundStyle(.white)
+                        .foregroundStyle(Color.white.adaptivePrimaryText)
                         .frame(maxWidth: .infinity)
                         .frame(height: 52)
                         .background(
@@ -493,8 +493,8 @@ struct LureliaTaskCategoryCard: View {
                                         .strokeBorder(
                                             LinearGradient(
                                                 colors: [
-                                                    LColors.gradientBlue.opacity(0.95),
-                                                    LColors.gradientPurple.opacity(0.95),
+                                                    Color.white.opacity(0.85).opacity(0.95),
+                                                    Color.white.opacity(0.85).opacity(0.95),
                                                     Color.white.opacity(0.45)
                                                 ],
                                                 startPoint: .topLeading,
@@ -762,10 +762,10 @@ struct LureliaTaskRow: View {
                 HStack(spacing: 6) {
                     Text(statusLabel)
                         .font(.system(size: 10, weight: .semibold, design: .rounded))
-                        .foregroundStyle(LColors.gradientBlue)
+                        .foregroundStyle(Color.white.opacity(0.85))
                         .padding(.horizontal, 7)
                         .padding(.vertical, 3)
-                        .background(LColors.gradientBlue.opacity(0.12))
+                        .background(Color.white.opacity(0.85).opacity(0.12))
                         .clipShape(Capsule())
 
                     Text("· \(subtitleText)")

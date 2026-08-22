@@ -345,7 +345,7 @@ struct JourneyTimelineView: View {
                         .renderingMode(.template)
                         .resizable()
                         .scaledToFit()
-                        .foregroundStyle(.white)
+                        .foregroundStyle(isCompleted ? LColors.bg : .white)
                         .padding(8)
                 }
                 .frame(width: 34, height: 34)
@@ -439,7 +439,7 @@ struct JourneyTimelineView: View {
                                                 .renderingMode(.template)
                                                 .resizable()
                                                 .scaledToFit()
-                                                .foregroundStyle(.white)
+                                                .foregroundStyle(LColors.bg)
                                                 .frame(width: 10, height: 10)
                                         }
                                     }

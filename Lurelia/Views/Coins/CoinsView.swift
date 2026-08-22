@@ -231,7 +231,7 @@ struct LureliaCoinsView: View {
                     LinearGradient(
                         colors: [
                             purplePrimary.opacity(0.55),
-                            LColors.gradientPurple.opacity(0.30)
+                            Color.white.opacity(0.85).opacity(0.30)
                         ],
                         startPoint: .topLeading,
                         endPoint: .bottomTrailing
@@ -651,7 +651,7 @@ struct LureliaCoinsSectionCard<Content: View>: View {
                     lineWidth: 1
                 )
         )
-        .shadow(color: LColors.gradientBlue.opacity(0.08), radius: 12, x: 0, y: 6)
+        .shadow(color: Color.white.opacity(0.85).opacity(0.08), radius: 12, x: 0, y: 6)
         .padding(.horizontal, 24)
     }
 }

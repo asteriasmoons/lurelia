@@ -81,7 +81,7 @@ struct LureliaNewJourneySheet: View {
                                                 .font(.system(size: 15, weight: .semibold, design: .rounded))
                                                 .foregroundStyle(.white)
                                         }
-                                        .tint(LColors.gradientPurple)
+                                        .tint(LColors.neutralPearl.opacity(0.72))
 
                                         if hasTargetDate {
                                             DatePicker(
@@ -91,7 +91,7 @@ struct LureliaNewJourneySheet: View {
                                             )
                                             .font(.system(size: 15, weight: .semibold, design: .rounded))
                                             .foregroundStyle(.white)
-                                            .tint(LColors.gradientBlue)
+                                            .tint(LColors.neutralPearl.opacity(0.72))
                                         }
                                     }
                                 }
@@ -135,7 +135,7 @@ struct LureliaNewJourneySheet: View {
                     .renderingMode(.template)
                     .resizable()
                     .scaledToFit()
-                    .foregroundStyle(LGradients.header)
+                    .foregroundStyle(LColors.textPrimary)
                     .frame(width: 24, height: 24)
             }
             .buttonStyle(.plain)
@@ -153,7 +153,7 @@ struct LureliaNewJourneySheet: View {
             } label: {
                 Text("Save")
                     .font(.system(size: 16, weight: .bold, design: .rounded))
-                    .foregroundStyle(canSave ? AnyShapeStyle(LGradients.header) : AnyShapeStyle(.white.opacity(0.35)))
+                    .foregroundStyle(canSave ? AnyShapeStyle(LColors.textPrimary) : AnyShapeStyle(.white.opacity(0.35)))
             }
             .buttonStyle(.plain)
             .disabled(!canSave)
@@ -211,27 +211,16 @@ extension LureliaNewJourneySheet {
     private var journeyIcon: some View {
         ZStack {
             Circle()
-                .fill(Color(lureliaHex: colorHex).opacity(0.18))
+                .fill(LColors.glassSurface2)
 
             Circle()
-                .strokeBorder(
-                    LinearGradient(
-                        colors: [
-                            Color(lureliaHex: colorHex).opacity(0.95),
-                            LColors.gradientPurple.opacity(0.95),
-                            Color.white.opacity(0.55)
-                        ],
-                        startPoint: .topLeading,
-                        endPoint: .bottomTrailing
-                    ),
-                    lineWidth: 1.4
-                )
+                .strokeBorder(LColors.glassBorder, lineWidth: 1.4)
 
             Image(iconName)
                 .renderingMode(.template)
                 .resizable()
                 .scaledToFit()
-                .foregroundStyle(.white)
+                .foregroundStyle(LColors.neutralPearl.opacity(0.82))
                 .padding(11)
         }
         .frame(width: 58, height: 58)
@@ -330,7 +319,7 @@ extension LureliaNewJourneySheet {
                         .renderingMode(.template)
                         .resizable()
                         .scaledToFit()
-                        .foregroundStyle(LGradients.header)
+                        .foregroundStyle(LColors.neutralPearl.opacity(0.82))
                         .frame(width: 16, height: 16)
                 }
             }

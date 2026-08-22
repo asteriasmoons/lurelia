@@ -13,55 +13,17 @@ struct LureliaApp: App {
     @UIApplicationDelegateAdaptor(LureliaAppDelegate.self) var delegate
 
     var sharedModelContainer: ModelContainer = {
-        let schema = Schema([
-            Item.self,
-            UserSettings.self,
-            LureliaReminder.self,
-            LureliaRoutine.self,
-            LureliaRoutineTask.self,
-            LureliaRoutineRunTask.self,
-            LureliaRoutineRun.self,
-            LureliaRoutineStats.self,
-            LureliaTask.self,
-            KanbanBoard.self,
-            KanbanColumn.self,
-            KanbanCard.self,
-            LureliaHabit.self,
-            LureliaHabitLog.self,
-            LureliaHabitSkip.self,
-            LureliaChallenge.self,
-            LureliaChallengeAction.self,
-            LureliaChallengeSystemStep.self,
-            LureliaChallengeEntry.self,
-            LureliaChallengeProgressReport.self,
-            LureliaChallengeReportResponse.self,
-            LureliaJourney.self,
-            LureliaJourneyCheckIn.self,
-            LureliaJourneyMilestone.self,
-            LureliaJourneyStep.self,
-            LureliaJourneyTimelineItem.self,
-            LureliaJourneyNote.self,
-            LureliaReminderHistory.self,
-            LureliaPractice.self,
-            LureliaRoutinePhase.self,
-        ])
-
         LureliaWidgetShared.migrateLocalStoreToAppGroupIfNeeded()
 
-        let modelConfiguration = ModelConfiguration(
-            "LureliaShared",
-            schema: schema,
-            url: LureliaWidgetShared.sharedStoreURL
-        )
-
         do {
-            return try ModelContainer(for: schema, configurations: [modelConfiguration])
+            return try LureliaWidgetShared.makeModelContainer()
         } catch {
             fatalError("Could not create ModelContainer: \(error)")
         }
     }()
 
     @Environment(\.scenePhase) private var scenePhase
+    @State private var routineMidnightResetTask: Task<Void, Never>?
 
     var body: some Scene {
         WindowGroup {
@@ -83,16 +45,33 @@ struct LureliaApp: App {
                     await exportReminderIconsForWidget()
                     HabitManager.shared.setup(container: sharedModelContainer)
                     RoutineManager.shared.resetRoutinesIfNewDay(context: sharedModelContainer.mainContext)
+                    scheduleRoutineMidnightReset()
                     
-                    await RoutineManager.shared.deleteAndStopAllRoutinesForever(
-                        context: sharedModelContainer.mainContext
-                    )
-                    
+                    // DISABLED: this deleted EVERY routine on every app launch
+                    // (part of the old "routines permanently disabled" work).
+                    // Commented out — kept for reference — now that Routines
+                    // are active again.
+                    //
+                    // await RoutineManager.shared.deleteAndStopAllRoutinesForever(
+                    //     context: sharedModelContainer.mainContext
+                    // )
+
+
                     print("🧪 LureliaApp directly triggering notification reschedule")
 
                     LureliaNotificationManager.shared.dumpAllNotificationCenterState(source: "LureliaApp before direct reschedule")
 
                     LureliaNotificationManager.shared.rescheduleAll(from: sharedModelContainer)
+                    LureliaEventNotificationManager.shared.rescheduleAll(from: sharedModelContainer)
+
+                    // Shared event platform: bind the offline mutation
+                    // queue to the SwiftData context and kick off the
+                    // drain so any mutations captured while offline get
+                    // replayed to vox-api on next launch.
+                    OfflineMutationQueue.shared.bind(to: sharedModelContainer.mainContext)
+                    OfflineMutationQueue.shared.startDraining(
+                        applyMutation: SharedEventsService.replay,
+                    )
 
                     DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) {
                         LureliaNotificationManager.shared.dumpAllNotificationCenterState(source: "LureliaApp after direct reschedule")
@@ -101,17 +80,49 @@ struct LureliaApp: App {
                 }
                 .onChange(of: scenePhase) { _, newPhase in
                     if newPhase == .active {
+                        // Replay any mutations queued while offline.
+                        OfflineMutationQueue.shared.startDraining(
+                            applyMutation: SharedEventsService.replay,
+                        )
                         Task {
                             RoutineManager.shared.resetRoutinesIfNewDay(context: sharedModelContainer.mainContext)
+                            scheduleRoutineMidnightReset()
                             await exportReminderIconsForWidget()
-                            WidgetCenter.shared.reloadTimelines(ofKind: "LureliaDueRemindersWidget")
-                            WidgetCenter.shared.reloadTimelines(ofKind: "LureliaDueRoutinesWidget")
-                            WidgetCenter.shared.reloadTimelines(ofKind: "LureliaHabitsWidget")
+                            LureliaWidgetReloads.reloadAll()
+                            LureliaWidgetReloads.reloadAll()
+                            LureliaWidgetReloads.reloadAll()
                         }
+                    } else if newPhase == .background {
+                        routineMidnightResetTask?.cancel()
+                        routineMidnightResetTask = nil
                     }
                 }
         }
         .modelContainer(sharedModelContainer)
+    }
+
+    private func scheduleRoutineMidnightReset() {
+        routineMidnightResetTask?.cancel()
+
+        let now = Date()
+        let nextMidnight = Calendar.current.dateInterval(of: .day, for: now)?.end
+            ?? Calendar.current.date(byAdding: .day, value: 1, to: now)
+            ?? now.addingTimeInterval(24 * 60 * 60)
+        let delay = max(1, nextMidnight.timeIntervalSince(now))
+        let nanoseconds = UInt64(delay * 1_000_000_000)
+
+        routineMidnightResetTask = Task { @MainActor in
+            do {
+                try await Task.sleep(nanoseconds: nanoseconds)
+            } catch {
+                return
+            }
+
+            guard !Task.isCancelled else { return }
+
+            RoutineManager.shared.resetRoutinesIfNewDay(context: sharedModelContainer.mainContext)
+            scheduleRoutineMidnightReset()
+        }
     }
 
     // Backfills timesOfDay and primaryHour/primaryMinute for all existing reminders
@@ -1914,6 +1925,10 @@ struct LureliaApp: App {
         iconNames.insert("playwavy")
         iconNames.insert("repeatfill")
         iconNames.insert("minuswavy")
+        // Timeline widget header icon — no user data references it, so
+        // without an explicit export the widget's title icon renders
+        // blank (LureliaWidgetShared.widgetIcon(for:) returns nil).
+        iconNames.insert("ringstarcal")
 
         let fileManager = FileManager.default
         let iconDirectory = LureliaWidgetShared.appGroupContainerURL.appendingPathComponent("widget_icons", isDirectory: true)
@@ -1939,9 +1954,22 @@ struct LureliaApp: App {
             }
 
             let pngData = renderer.pngData { _ in
+                let sourceSize = sourceImage.size
+                guard sourceSize.width > 0, sourceSize.height > 0 else { return }
+
+                let scale = min(iconSize.width / sourceSize.width, iconSize.height / sourceSize.height)
+                let fittedSize = CGSize(
+                    width: sourceSize.width * scale,
+                    height: sourceSize.height * scale
+                )
+                let fittedOrigin = CGPoint(
+                    x: (iconSize.width - fittedSize.width) / 2,
+                    y: (iconSize.height - fittedSize.height) / 2
+                )
+
                 sourceImage.withRenderingMode(.alwaysTemplate)
                     .withTintColor(.white)
-                    .draw(in: CGRect(origin: .zero, size: iconSize))
+                    .draw(in: CGRect(origin: fittedOrigin, size: fittedSize))
             }
 
             do {

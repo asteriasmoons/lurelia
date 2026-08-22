@@ -42,6 +42,8 @@ final class LureliaRoutineTask {
     var title: String = ""
     var icon: String = "sparkle"
     var notes: String = ""
+    /// User-provided goal / context used to fill out the task's detail blueprint.
+    var context: String = ""
     var sortOrder: Int = 0
     var createdAt: Date = Date()
     var updatedAt: Date = Date()
@@ -63,11 +65,70 @@ final class LureliaRoutineTask {
     var routine: LureliaRoutine?
     
     // MARK: - Phase Link
-    
+
     var phaseID: String?
-    
+
+    // MARK: - Detail Blueprint (per-task)
+
+    /// Why this task exists.
+    var purpose: String = ""
+    /// What emotionally / practically encourages follow-through.
+    var motivation: String = ""
+    /// The moment / event that signals the task should begin (formerly "Cue").
+    /// This is the trigger *description*; `triggerType` and `triggerReason`
+    /// mirror the habit Cue's type + "why this works" structure exactly.
+    var trigger: String = ""
+    /// Raw value of the selected trigger type (reuses LureliaCueType).
+    var triggerTypeRaw: String?
+    /// Why this trigger works.
+    var triggerReason: String = ""
+    /// Where the task is normally performed.
+    var environment: String = ""
+    /// What is currently making the task harder to begin or complete.
+    var friction: String = ""
+    /// The reward associated with completing the task.
+    var reward: String = ""
+    /// What happens if the task is not completed.
+    var consequence: String = ""
+    /// What to do after missing / skipping the task.
+    var recoveryPlan: String = ""
+
+    // MARK: - Schedule (per-task)
+
+    var hasDueTime: Bool = false
+    var dueHour: Int = 8
+    var dueMinute: Int = 0
+    var estimatedDurationMinutes: Int = 0
+    var repeatsOnDays: Bool = false
+    /// 1 = Sunday ... 7 = Saturday
+    var scheduledDays: [Int] = []
+
+    // MARK: - Notifications & Alarm (per-task)
+
+    var notificationsEnabled: Bool = false
+    /// Lead-time offsets (minutes before the due time) for each notification.
+    var notificationLeadMinutes: [Int] = []
+    var notificationIDs: [String] = []
+    var alarmEnabled: Bool = false
+    var alarmSoundName: String?
+    var alarmIDString: String?
+
+    // MARK: - Structured Content (owned child models, CloudKit-safe)
+
+    @Relationship(deleteRule: .cascade, inverse: \LureliaRoutineTaskStep.task)
+    var stepItems: [LureliaRoutineTaskStep]?
+
+    @Relationship(deleteRule: .cascade, inverse: \LureliaRoutineTaskSupply.task)
+    var supplyItems: [LureliaRoutineTaskSupply]?
+
+    @Relationship(deleteRule: .cascade, inverse: \LureliaRoutineTaskObstacle.task)
+    var obstacleItems: [LureliaRoutineTaskObstacle]?
+
+    @Relationship(deleteRule: .cascade, inverse: \LureliaRoutineTaskHistoryEntry.task)
+    var historyItems: [LureliaRoutineTaskHistoryEntry]?
+
     // MARK: - Init
-    
+
     init(
         title: String,
         icon: String = "sparkle",
@@ -112,6 +173,9 @@ final class LureliaRoutineTask {
         state = "pending"
         completedAt = nil
         skippedAt = nil
+        for step in stepItems ?? [] {
+            step.resetCompletion()
+        }
         updatedAt = Date()
     }
 }
@@ -272,6 +336,13 @@ final class LureliaRoutineRun {
 
 // MARK: - Routine
 
+enum LureliaRoutineOffDayValidationResult: Equatable {
+    case valid
+    case duplicate
+    case backToBack
+    case limitReached
+}
+
 @Model
 final class LureliaRoutine {
     
@@ -307,6 +378,7 @@ final class LureliaRoutine {
     var remindersEnabled: Bool = false
     var durationMode: Bool = false
     var durationMinutesOverride: Int = 30
+    var offDayKeysStorage: String = "[]"
     
     // MARK: - Notification IDs
 
@@ -346,6 +418,9 @@ final class LureliaRoutine {
     
     @Relationship(deleteRule: .cascade, inverse: \LureliaRoutinePhase.routine)
     var phases: [LureliaRoutinePhase]?
+
+    @Relationship(deleteRule: .nullify, inverse: \LureliaRoutineContract.routine)
+    var contracts: [LureliaRoutineContract]?
     
     // MARK: - Init
     
@@ -445,6 +520,119 @@ final class LureliaRoutine {
                 principlesStorage = string
             }
         }
+    }
+
+    var offDayKeys: Set<String> {
+        get {
+            guard let data = offDayKeysStorage.data(using: .utf8),
+                  let decoded = try? JSONDecoder().decode([String].self, from: data) else {
+                return []
+            }
+            return Set(decoded)
+        }
+        set {
+            let sorted = Array(newValue).sorted()
+            if let data = try? JSONEncoder().encode(sorted),
+               let string = String(data: data, encoding: .utf8) {
+                offDayKeysStorage = string
+            } else {
+                offDayKeysStorage = "[]"
+            }
+            updatedAt = Date()
+        }
+    }
+
+    func offDayKey(
+        for date: Date,
+        calendar: Calendar = .current
+    ) -> String {
+        let day = calendar.startOfDay(for: date)
+        let components = calendar.dateComponents([.year, .month, .day], from: day)
+        return String(
+            format: "%04d-%02d-%02d",
+            components.year ?? 0,
+            components.month ?? 0,
+            components.day ?? 0
+        )
+    }
+
+    func offDayDate(
+        from key: String,
+        calendar: Calendar = .current
+    ) -> Date? {
+        let formatter = DateFormatter()
+        formatter.calendar = calendar
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.timeZone = calendar.timeZone
+        formatter.dateFormat = "yyyy-MM-dd"
+        return formatter.date(from: key)
+    }
+
+    func sortedOffDayDates(calendar: Calendar = .current) -> [Date] {
+        offDayKeys
+            .compactMap { offDayDate(from: $0, calendar: calendar) }
+            .sorted()
+    }
+
+    func isOffDay(
+        _ date: Date,
+        calendar: Calendar = .current
+    ) -> Bool {
+        offDayKeys.contains(offDayKey(for: date, calendar: calendar))
+    }
+
+    func offDayValidationResult(
+        for date: Date,
+        calendar: Calendar = .current
+    ) -> LureliaRoutineOffDayValidationResult {
+        let day = calendar.startOfDay(for: date)
+        let key = offDayKey(for: day, calendar: calendar)
+        let existingDates = sortedOffDayDates(calendar: calendar)
+
+        if offDayKeys.contains(key) {
+            return .duplicate
+        }
+
+        let isBackToBack = existingDates.contains { existing in
+            abs(calendar.dateComponents([.day], from: existing, to: day).day ?? 0) == 1
+        }
+
+        if isBackToBack {
+            return .backToBack
+        }
+
+        let datesInRollingWindow = existingDates.filter { existing in
+            abs(calendar.dateComponents([.day], from: existing, to: day).day ?? 0) < 30
+        }
+
+        if datesInRollingWindow.count >= 2 {
+            return .limitReached
+        }
+
+        return .valid
+    }
+
+    @discardableResult
+    func addOffDay(
+        _ date: Date,
+        calendar: Calendar = .current
+    ) -> LureliaRoutineOffDayValidationResult {
+        let result = offDayValidationResult(for: date, calendar: calendar)
+        guard result == .valid else { return result }
+
+        var keys = offDayKeys
+        keys.insert(offDayKey(for: date, calendar: calendar))
+        offDayKeys = keys
+        return .valid
+    }
+
+    func removeOffDay(
+        _ date: Date,
+        calendar: Calendar = .current
+    ) {
+        var keys = offDayKeys
+        keys.remove(offDayKey(for: date, calendar: calendar))
+        offDayKeys = keys
     }
     
     func tasksForPhase(_ phase: LureliaRoutinePhase) -> [LureliaRoutineTask] {

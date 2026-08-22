@@ -16,6 +16,7 @@ struct LureliaHabitCard: View {
     let onEdit: () -> Void
     let onHistory: () -> Void
 
+    @State private var isExpanded = false
     @State private var showDeleteConfirm = false
     @State private var showResetConfirm = false
     @State private var statusNow = Date()
@@ -24,29 +25,9 @@ struct LureliaHabitCard: View {
     private var todaysLog: LureliaHabitLog? { habit.todaysLog() }
     private var todaysSkip: LureliaHabitSkip? { habit.todaysSkip() }
 
-    private struct ScheduledTimeBadge: Identifiable, Hashable {
-        let label: String
-        let fireDate: Date
+    private var accent: Color { habit.color }
 
-        var id: String {
-            "\(label)-\(fireDate.timeIntervalSince1970)"
-        }
-    }
-
-    private var scheduledTimeBadges: [ScheduledTimeBadge] {
-        let formatter = DateFormatter()
-        formatter.locale = .current
-        formatter.timeZone = .current
-        formatter.dateStyle = .none
-        formatter.timeStyle = .short
-
-        return todayScheduledFireTimes.map { fireDate in
-            ScheduledTimeBadge(
-                label: formatter.string(from: fireDate),
-                fireDate: fireDate
-            )
-        }
-    }
+    // MARK: - Scheduled fire times
 
     private var todayScheduledFireTimes: [Date] {
         guard habit.reminderEnabled else { return [] }
@@ -54,7 +35,6 @@ struct LureliaHabitCard: View {
         let times = habit.timesOfDay.filter {
             !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
         }
-
         guard !times.isEmpty else { return [] }
 
         let calendar = Calendar.current
@@ -71,302 +51,183 @@ struct LureliaHabitCard: View {
             guard parts.count == 2,
                   let hour = Int(parts[0]),
                   let minute = Int(parts[1])
-            else {
-                return nil
-            }
+            else { return nil }
 
             var components = calendar.dateComponents([.year, .month, .day], from: today)
             components.hour = hour
             components.minute = minute
             components.second = 0
-
             return calendar.date(from: components)
         }
         .sorted()
     }
 
-    private var nextUncompletedHabitFireAtToday: Date? {
+    private var nextUncompletedFire: Date? {
         let completedCount = habit.todaysCount
         let scheduled = todayScheduledFireTimes
-
         guard completedCount < scheduled.count else { return nil }
-
         return scheduled[completedCount]
     }
 
-    private func isNextDueTimeBadge(_ badge: ScheduledTimeBadge) -> Bool {
-        guard let nextUncompleted = nextUncompletedHabitFireAtToday else { return false }
-        return abs(badge.fireDate.timeIntervalSince(nextUncompleted)) < 60
+    private var timeSlotLabels: [String] {
+        let formatter = DateFormatter()
+        formatter.locale = .current
+        formatter.timeZone = .current
+
+        return todayScheduledFireTimes.map { date in
+            let minutes = Calendar.current.component(.minute, from: date)
+            formatter.dateFormat = minutes == 0 ? "ha" : "h:mma"
+            return formatter.string(from: date).uppercased()
+        }
     }
 
-    private var activeTrackingStartDay: Date {
-        let calendar = Calendar.current
-        let createdStart = calendar.startOfDay(for: habit.createdAt)
-
-        if let resetAt = habit.statsResetAt {
-            return max(createdStart, calendar.startOfDay(for: resetAt))
-        }
-
-        return createdStart
+    /// Structured status so the bottom-row pill can render "Label · Time"
+    /// rather than a plain interpolated string.
+    private enum StatusPillContent {
+        case labelled(String, String)   // e.g. ("Due", "1:00 PM")
+        case plain(String)              // e.g. "Completed today"
     }
 
-    private var mostRecentMissedFireAtBeforeToday: Date? {
-        guard habit.reminderEnabled,
-              !habit.isCompletedToday,
-              todaysSkip == nil
-        else {
-            return nil
+    private var statusPill: StatusPillContent {
+        if habit.isCompletedToday { return .plain("Completed today") }
+        if todaysSkip != nil { return .plain("Skipped today") }
+
+        if let next = nextUncompletedFire {
+            let formatter = DateFormatter()
+            formatter.dateStyle = .none
+            formatter.timeStyle = .short
+            let label = formatter.string(from: next)
+            return .labelled(next <= statusNow ? "Due" : "Next", label)
         }
 
-        let times = habit.timesOfDay.filter {
-            !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        if habit.reminderEnabled == false && habit.target > habit.todaysCount {
+            let remaining = habit.target - habit.todaysCount
+            return .plain("\(remaining) left today")
         }
 
-        guard !times.isEmpty else { return nil }
-
-        let calendar = Calendar.current
-        let allowedWeekdays = Set(habit.reminderDaysOfWeek)
-        let today = calendar.startOfDay(for: statusNow)
-        let startDay = activeTrackingStartDay
-
-        for offset in 1...370 {
-            guard let day = calendar.date(byAdding: .day, value: -offset, to: today) else { continue }
-
-            let dayStart = calendar.startOfDay(for: day)
-
-            if dayStart < startDay {
-                break
-            }
-
-            let weekday = calendar.component(.weekday, from: dayStart)
-
-            if !allowedWeekdays.isEmpty && !allowedWeekdays.contains(weekday) {
-                continue
-            }
-
-            let wasCompleted = (habit.logs ?? []).contains { log in
-                calendar.isDate(log.dayStart, inSameDayAs: dayStart) && log.count >= habit.target
-            }
-
-            if wasCompleted {
-                continue
-            }
-
-            let wasSkipped = (habit.skips ?? []).contains { skip in
-                calendar.isDate(skip.dayStart, inSameDayAs: dayStart)
-            }
-
-            if wasSkipped {
-                continue
-            }
-
-            return times.compactMap { timeString -> Date? in
-                let parts = timeString.split(separator: ":")
-                guard parts.count == 2,
-                      let hour = Int(parts[0]),
-                      let minute = Int(parts[1])
-                else {
-                    return nil
-                }
-
-                var components = calendar.dateComponents([.year, .month, .day], from: dayStart)
-                components.hour = hour
-                components.minute = minute
-                components.second = 0
-
-                return calendar.date(from: components)
-            }
-            .sorted(by: >)
-            .first
-        }
-
-        return nil
+        return .plain("None today")
     }
 
-    private enum HabitStatusBadgeKind {
-        case overdue
-        case dueNow
-        case upcoming
-    }
-
-    private var habitStatusBadgeKind: HabitStatusBadgeKind? {
-        guard habit.reminderEnabled,
-              todaysSkip == nil,
-              !habit.isCompletedToday
-        else {
-            return nil
-        }
-
-        if let nextUncompleted = nextUncompletedHabitFireAtToday {
-            if nextUncompleted <= statusNow {
-                return .dueNow
-            }
-
-            if Calendar.current.isDateInToday(nextUncompleted) {
-                return .upcoming
-            }
-        }
-
-        if mostRecentMissedFireAtBeforeToday != nil {
-            return .overdue
-        }
-
-        return nil
-    }
+    // MARK: - Body
 
     var body: some View {
-        GlassCard {
-            VStack(alignment: .leading, spacing: 14) {
+        // Tighten the GlassCard's own vertical/horizontal padding — the default
+        // (LSpacing.cardPadding = 20) is the biggest contributor to card height.
+        GlassCard(cornerRadius: 20, padding: 14, tint: accent) {
+            VStack(alignment: .leading, spacing: 8) {
 
-                // MARK: - Title + Completion Circle
+                // Row 1: icon + title + count
+                HStack(alignment: .center, spacing: 10) {
+                    LureliaHabitIconPreview(iconName: habit.iconName ?? "flame", tint: accent)
+                        .frame(width: 30, height: 30)
 
-                HStack(alignment: .center, spacing: 12) {
-                    LureliaHabitIconPreview(iconName: habit.iconName ?? "flame")
-                        .frame(width: 42)
+                    Text(habit.title)
+                        .font(.system(size: 17, weight: .black, design: .rounded))
+                        .foregroundStyle(.white)
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.85)
 
-                    VStack(alignment: .leading, spacing: 8) {
-                        Text(habit.title)
-                            .font(.system(size: 24, weight: .black, design: .rounded))
+                    Spacer(minLength: 6)
+
+                    Text("\(habit.todaysCount)/\(habit.target)")
+                        .font(.system(size: 13, weight: .bold, design: .rounded))
+                        .foregroundStyle(.white)
+                        .padding(.horizontal, 9)
+                        .padding(.vertical, 3)
+                        .background(accent.opacity(0.22), in: Capsule())
+                        .overlay(
+                            Capsule().strokeBorder(accent.opacity(0.55), lineWidth: 1)
+                        )
+
+                    // Pencil edit button — separate tap target, does NOT navigate.
+                    Button {
+                        onEdit()
+                    } label: {
+                        Image("pencil")
+                            .renderingMode(.template)
+                            .resizable()
+                            .scaledToFit()
+                            .frame(width: 12, height: 12)
+                            .foregroundStyle(accent)
+                            .frame(width: 24, height: 24)
+                            .background(accent.opacity(0.14), in: Circle())
+                            .overlay(Circle().strokeBorder(accent.opacity(0.45), lineWidth: 1))
+                    }
+                    .buttonStyle(.plain)
+                    .simultaneousGesture(TapGesture().onEnded {})
+                }
+
+                // Row 2 (combined): each occurrence is a compact vertical unit
+                // (circle stacked directly over its time-label pill). Units sit
+                // in a leading-aligned HStack with consistent spacing — no
+                // full-width spreading, so 1-occurrence habits hug the leading
+                // side and 5-occurrence habits stay dense.
+                occurrenceRow
+                    .padding(.top, 2) // small breathing room after the icon row
+
+                // Row 3: status pill (leading) + streak+chevron cluster (trailing).
+                HStack(alignment: .center, spacing: 8) {
+                    statusPillView
+
+                    Spacer(minLength: 6)
+
+                    HStack(spacing: 4) {
+                        Image("flame")
+                            .renderingMode(.template)
+                            .resizable()
+                            .scaledToFit()
+                            .frame(width: 11, height: 11)
+                            .foregroundStyle(accent)
+
+                        Text("\(habit.dailyStreak) \(habit.dailyStreak == 1 ? "day" : "days")")
+                            .font(.system(size: 11, weight: .bold, design: .rounded))
                             .foregroundStyle(.white)
                     }
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 4)
+                    .background(accent.opacity(0.18), in: Capsule())
+                    .overlay(Capsule().strokeBorder(accent.opacity(0.45), lineWidth: 1))
 
-                    Spacer(minLength: 8)
-
-                    habitCompletionCircle
-                        .offset(y: 1)
+                    // Chevron — separate tap target, does NOT navigate.
+                    Button {
+                        withAnimation(.spring(response: 0.3, dampingFraction: 0.85)) {
+                            isExpanded.toggle()
+                        }
+                    } label: {
+                        Image(isExpanded ? "chevup" : "chevdown")
+                            .renderingMode(.template)
+                            .resizable()
+                            .scaledToFit()
+                            .frame(width: 12, height: 12)
+                            .foregroundStyle(accent)
+                            .frame(width: 24, height: 24)
+                            .background(accent.opacity(0.14), in: Circle())
+                            .overlay(Circle().strokeBorder(accent.opacity(0.45), lineWidth: 1))
+                    }
+                    .buttonStyle(.plain)
+                    // Prevent the surrounding NavigationLink from firing.
+                    .simultaneousGesture(TapGesture().onEnded {})
                 }
 
-                // MARK: - Pill Badges
+                // Expanded management controls
+                if isExpanded {
+                    Rectangle()
+                        .fill(accent.opacity(0.25))
+                        .frame(height: 1)
+                        .padding(.top, 2)
 
-                HabitPillRow(pills: buildStatusAndTimePills())
-
-                // MARK: - Progress Bar or Dots
-
-                if habit.target == 1 {
-                    VStack(spacing: 5) {
-                        HStack {
-                            Text("\(habit.todaysCount) / \(habit.target) completed")
-                                .font(.system(size: 12, design: .rounded))
-                                .foregroundStyle(.white.opacity(0.45))
-
-                            Spacer()
-                            
-                        }
-
-                        HStack(spacing: 4) {
-                            let dotCount = 18
-                            let filledDots = Int((habit.progress * Double(dotCount)).rounded())
-
-                            ForEach(0..<dotCount, id: \.self) { index in
-                                Circle()
-                                    .fill(
-                                        index < filledDots
-                                        ? AnyShapeStyle(LGradients.header)
-                                        : AnyShapeStyle(Color.clear)
-                                    )
-                                    .frame(width: 11, height: 11)
-                                    .overlay {
-                                        Circle()
-                                            .strokeBorder(
-                                                index < filledDots
-                                                ? AnyShapeStyle(LGradients.header)
-                                                : AnyShapeStyle(Color.white.opacity(0.25)),
-                                                lineWidth: 1
-                                            )
-                                    }
-                            }
-                        }
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .animation(.spring(duration: 0.4), value: habit.progress)
-                    }
-                } else {
-                    HStack(spacing: 6) {
-                        ForEach(0..<habit.target, id: \.self) { i in
-                            Circle()
-                                .fill(
-                                    i < habit.todaysCount
-                                    ? AnyShapeStyle(LGradients.header)
-                                    : AnyShapeStyle(Color.clear)
-                                )
-                                .frame(width: 12, height: 12)
-                                .overlay {
-                                    Circle()
-                                        .strokeBorder(
-                                            i < habit.todaysCount
-                                            ? AnyShapeStyle(LGradients.header)
-                                            : AnyShapeStyle(Color.white.opacity(0.35)),
-                                            lineWidth: 1.25
-                                        )
-                                }
-                        }
-                    }
-
-                    HStack {
-                        Text("\(habit.todaysCount) / \(habit.target) completed")
-                            .font(.system(size: 12, design: .rounded))
-                            .foregroundStyle(.white.opacity(0.45))
-
-                        Spacer()
-                    }
+                    expandedControls
                 }
-
-                // MARK: - Actions
-
-                VStack(alignment: .leading, spacing: 8) {
-                    HStack(spacing: 6) {
-                        actionButton("Edit", icon: "pencil") {
-                            onEdit()
-                        }
-
-                        actionButton("Clear", icon: "arrow.counterclockwise") {
-                            clearToday()
-                        }
-
-                        actionButton(
-                            todaysSkip == nil ? "Skip" : "Skipped",
-                            icon: "skipwavy",
-                            isAsset: true
-                        ) {
-                            toggleSkip()
-                        }
-
-                        actionButton("Reset", icon: "arrow.clockwise") {
-                            showResetConfirm = true
-                        }
-
-                        Spacer(minLength: 0)
-                    }
-
-                    HStack(spacing: 8) {
-                        actionButton("History", icon: "clock.arrow.circlepath") {
-                            onHistory()
-                        }
-                        
-                        destructiveButton("Delete", icon: "trash", isAsset: true) {
-                            showDeleteConfirm = true
-                        }
-
-                        Spacer()
-                    }
-                }
-                .font(.system(size: 12, weight: .semibold, design: .rounded))
-                .imageScale(.small)
             }
         }
         .alert("Delete Habit?", isPresented: $showDeleteConfirm) {
-            Button("Delete", role: .destructive) {
-                deleteHabit()
-            }
-
+            Button("Delete", role: .destructive) { deleteHabit() }
             Button("Cancel", role: .cancel) { }
         } message: {
             Text("This will permanently delete this habit and all of its history.")
         }
         .alert("Reset Stats?", isPresented: $showResetConfirm) {
-            Button("Reset", role: .destructive) {
-                resetStats()
-            }
-
+            Button("Reset", role: .destructive) { resetStats() }
             Button("Cancel", role: .cancel) { }
         } message: {
             Text("Streaks and stats will restart from today. Past log history is kept.")
@@ -376,44 +237,141 @@ struct LureliaHabitCard: View {
         }
     }
 
-    // MARK: - Completion Circle
+    // MARK: - Progress dots + time pills (two independent leading rows)
 
-    private var habitCompletionCircle: some View {
-        Button {
-            quickLog()
-        } label: {
-            ZStack {
-                Circle()
-                    .fill(
-                        habit.isCompletedToday
-                        ? AnyShapeStyle(LGradients.header)
-                        : AnyShapeStyle(Color.clear)
-                    )
-                    .frame(width: 40)
-                    .overlay {
+    @ViewBuilder
+    private var occurrenceRow: some View {
+        let count = habit.target
+        let labels = timeSlotLabels
+
+        VStack(alignment: .leading, spacing: 6) {
+            // Progress indicator: single-occurrence habits get a slim bar,
+            // multi-occurrence habits keep the compact dot row.
+            if count == 1 {
+                singleProgressBar
+            } else {
+                HStack(spacing: 7) {
+                    ForEach(0..<count, id: \.self) { i in
+                        let filled = i < habit.todaysCount
                         Circle()
-                            .strokeBorder(
-                                habit.isCompletedToday
-                                ? AnyShapeStyle(LGradients.header)
-                                : AnyShapeStyle(LGradients.header.opacity(0.85)),
-                                lineWidth: 2.5
+                            .fill(filled ? accent : Color.clear)
+                            .frame(width: 11, height: 11)
+                            .overlay(
+                                Circle().strokeBorder(
+                                    filled ? accent : accent.opacity(0.45),
+                                    lineWidth: 1.4
+                                )
                             )
                     }
-
-                if habit.isCompletedToday {
-                    Image("checkwavy")
-                        .renderingMode(.template)
-                        .resizable()
-                        .scaledToFit()
-                        .frame(width: 22, height: 22)
-                        .foregroundStyle(.white)
                 }
+                .frame(maxWidth: .infinity, alignment: .leading)
             }
-            .contentShape(Circle())
+
+            // Time pills: their own leading-aligned horizontal row, not tied
+            // to the dot positions.
+            if !labels.isEmpty {
+                HStack(spacing: 6) {
+                    ForEach(Array(labels.enumerated()), id: \.offset) { _, label in
+                        timePill(label)
+                    }
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+            }
         }
-        .buttonStyle(.plain)
-        .disabled(todaysSkip != nil || habit.isCompletedToday)
-        .opacity((todaysSkip != nil || habit.isCompletedToday) ? 0.55 : 1)
+        .animation(.spring(duration: 0.35), value: habit.todaysCount)
+    }
+
+    // MARK: - Single-Occurrence Progress Bar
+
+    @ViewBuilder
+    private var singleProgressBar: some View {
+        // Slim capsule bar tinted with the habit's color. Fills when the
+        // one-per-day habit is completed.
+        GeometryReader { geo in
+            ZStack(alignment: .leading) {
+                Capsule()
+                    .fill(accent.opacity(0.18))
+
+                Capsule()
+                    .fill(accent)
+                    .frame(width: geo.size.width * habit.progress)
+            }
+            .overlay(Capsule().strokeBorder(accent.opacity(0.45), lineWidth: 1))
+        }
+        .frame(height: 8)
+        .animation(.spring(duration: 0.35), value: habit.progress)
+    }
+
+    // MARK: - Time / Status Pills (habit-tinted)
+
+    @ViewBuilder
+    private func timePill(_ text: String) -> some View {
+        Text(text)
+            .font(.system(size: 10, weight: .bold, design: .rounded))
+            .foregroundStyle(.white.opacity(0.9))
+            .fixedSize()
+            .padding(.horizontal, 7)
+            .padding(.vertical, 3)
+            .background(accent.opacity(0.16), in: Capsule())
+            .overlay(Capsule().strokeBorder(accent.opacity(0.45), lineWidth: 1))
+    }
+
+    @ViewBuilder
+    private var statusPillView: some View {
+        HStack(spacing: 5) {
+            switch statusPill {
+            case .labelled(let label, let time):
+                Text(label)
+                    .font(.system(size: 11, weight: .bold, design: .rounded))
+                    .foregroundStyle(.white.opacity(0.9))
+
+                Circle()
+                    .fill(accent.opacity(0.7))
+                    .frame(width: 3, height: 3)
+
+                Text(time)
+                    .font(.system(size: 11, weight: .semibold, design: .rounded))
+                    .foregroundStyle(.white)
+
+            case .plain(let text):
+                Text(text)
+                    .font(.system(size: 11, weight: .semibold, design: .rounded))
+                    .foregroundStyle(.white.opacity(0.85))
+            }
+        }
+        .lineLimit(1)
+        .fixedSize()
+        .padding(.horizontal, 9)
+        .padding(.vertical, 4)
+        .background(accent.opacity(0.18), in: Capsule())
+        .overlay(Capsule().strokeBorder(accent.opacity(0.45), lineWidth: 1))
+    }
+
+    // MARK: - Expanded Controls
+
+    @ViewBuilder
+    private var expandedControls: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 6) {
+                actionButton("Edit", icon: "pencil") { onEdit() }
+                actionButton("Clear", icon: "arrow.counterclockwise") { clearToday() }
+                actionButton(
+                    todaysSkip == nil ? "Skip" : "Skipped",
+                    icon: "skipwavy",
+                    isAsset: true
+                ) { toggleSkip() }
+                actionButton("Reset", icon: "arrow.clockwise") { showResetConfirm = true }
+                Spacer(minLength: 0)
+            }
+
+            HStack(spacing: 8) {
+                actionButton("History", icon: "clock.arrow.circlepath") { onHistory() }
+                destructiveButton("Delete", icon: "trash", isAsset: true) { showDeleteConfirm = true }
+                Spacer()
+            }
+        }
+        .font(.system(size: 12, weight: .semibold, design: .rounded))
+        .imageScale(.small)
     }
 
     // MARK: - Action Buttons
@@ -444,11 +402,12 @@ struct LureliaHabitCard: View {
             .foregroundStyle(.white.opacity(0.85))
             .padding(.horizontal, 11)
             .padding(.vertical, 7)
-            .background(.white.opacity(0.08))
+            .background(accent.opacity(0.14))
             .clipShape(Capsule())
-            .overlay(Capsule().strokeBorder(.white.opacity(0.14), lineWidth: 1))
+            .overlay(Capsule().strokeBorder(accent.opacity(0.35), lineWidth: 1))
         }
         .buttonStyle(.plain)
+        .simultaneousGesture(TapGesture().onEnded {})
     }
 
     @ViewBuilder
@@ -477,11 +436,12 @@ struct LureliaHabitCard: View {
             .foregroundStyle(.white)
             .padding(.horizontal, 11)
             .padding(.vertical, 7)
-            .background(LGradients.header)
+            .background(accent)
             .clipShape(Capsule())
             .overlay(Capsule().strokeBorder(Color.white.opacity(0.28), lineWidth: 1))
         }
         .buttonStyle(.plain)
+        .simultaneousGesture(TapGesture().onEnded {})
     }
 
     // MARK: - Actions
@@ -507,7 +467,7 @@ struct LureliaHabitCard: View {
             }
 
             try? modelContext.save()
-            WidgetCenter.shared.reloadTimelines(ofKind: "LureliaHabitsWidget")
+            LureliaWidgetReloads.reloadAll()
             return
         }
 
@@ -522,7 +482,7 @@ struct LureliaHabitCard: View {
         habit.updatedAt = Date()
 
         try? modelContext.save()
-        WidgetCenter.shared.reloadTimelines(ofKind: "LureliaHabitsWidget")
+        LureliaWidgetReloads.reloadAll()
     }
 
     private func clearToday() {
@@ -543,7 +503,7 @@ struct LureliaHabitCard: View {
         habit.updatedAt = Date()
 
         try? modelContext.save()
-        WidgetCenter.shared.reloadTimelines(ofKind: "LureliaHabitsWidget")
+        LureliaWidgetReloads.reloadAll()
     }
 
     private func toggleSkip() {
@@ -555,7 +515,7 @@ struct LureliaHabitCard: View {
             habit.updatedAt = Date()
 
             try? modelContext.save()
-            WidgetCenter.shared.reloadTimelines(ofKind: "LureliaHabitsWidget")
+            LureliaWidgetReloads.reloadAll()
             return
         }
 
@@ -573,7 +533,7 @@ struct LureliaHabitCard: View {
         habit.updatedAt = Date()
 
         try? modelContext.save()
-        WidgetCenter.shared.reloadTimelines(ofKind: "LureliaHabitsWidget")
+        LureliaWidgetReloads.reloadAll()
     }
 
     private func resetStats() {
@@ -581,7 +541,7 @@ struct LureliaHabitCard: View {
         habit.updatedAt = Date()
 
         try? modelContext.save()
-        WidgetCenter.shared.reloadTimelines(ofKind: "LureliaHabitsWidget")
+        LureliaWidgetReloads.reloadAll()
     }
 
     private func deleteHabit() {
@@ -598,194 +558,6 @@ struct LureliaHabitCard: View {
         modelContext.delete(habit)
 
         try? modelContext.save()
-        WidgetCenter.shared.reloadTimelines(ofKind: "LureliaHabitsWidget")
-    }
-
-    // MARK: - Pill Data Builder
-
-    private func buildStatusAndTimePills() -> [HabitPillItem] {
-        var pills: [HabitPillItem] = []
-
-        switch habitStatusBadgeKind {
-        case .overdue:
-            pills.append(.init(label: "OVERDUE", isGradient: false, r: 1.0, g: 0.61, b: 0.90))
-        case .dueNow:
-            pills.append(.init(label: "DUE NOW", isGradient: false, r: 0.71, g: 0.46, b: 1.0))
-        case .upcoming:
-            pills.append(.init(label: "UPCOMING", isGradient: false, r: 0.49, g: 0.93, b: 1.0))
-        case .none:
-            break
-        }
-
-        if todaysSkip != nil {
-            pills.append(.init(label: "SKIPPED", isGradient: false, r: 1, g: 1, b: 1, alpha: 0.35))
-        }
-
-        if habit.isCompletedToday {
-            pills.append(.init(label: "DONE", isGradient: false, r: 0.3, g: 0.9, b: 0.5))
-        }
-
-        for timeBadge in scheduledTimeBadges {
-            pills.append(
-                .init(
-                    label: timeBadge.label,
-                    isGradient: isNextDueTimeBadge(timeBadge),
-                    r: 1,
-                    g: 1,
-                    b: 1,
-                    alpha: 0.55
-                )
-            )
-        }
-
-        return pills
-    }
-}
-
-// MARK: - Habit Pill Row
-
-private struct HabitPillRow: View {
-    let pills: [HabitPillItem]
-
-    var body: some View {
-        FlexibleView(data: pills, spacing: 4, alignment: .leading) { pill in
-            pill.view
-        }
-    }
-}
-
-private struct HabitPillItem: Identifiable, Hashable {
-    let id: String
-    let label: String
-    let isGradient: Bool
-    let r: Double
-    let g: Double
-    let b: Double
-    let alpha: Double
-
-    init(
-        label: String,
-        isGradient: Bool,
-        r: Double = 1,
-        g: Double = 1,
-        b: Double = 1,
-        alpha: Double = 1
-    ) {
-        self.id = label
-        self.label = label
-        self.isGradient = isGradient
-        self.r = r
-        self.g = g
-        self.b = b
-        self.alpha = alpha
-    }
-
-    var color: Color {
-        Color(red: r, green: g, blue: b).opacity(alpha)
-    }
-
-    @ViewBuilder
-    var view: some View {
-        if isGradient {
-            Text(label)
-                .font(.system(size: 9, weight: .bold, design: .rounded))
-                .foregroundStyle(.white)
-                .padding(.horizontal, 8)
-                .padding(.vertical, 4)
-                .fixedSize(horizontal: true, vertical: false)
-                .background(Capsule().fill(LGradients.header))
-                .overlay(Capsule().strokeBorder(Color.white.opacity(0.28), lineWidth: 1))
-        } else {
-            Text(label)
-                .font(.system(size: 9, weight: .bold, design: .rounded))
-                .foregroundStyle(color)
-                .padding(.horizontal, 8)
-                .padding(.vertical, 4)
-                .fixedSize(horizontal: true, vertical: false)
-                .background(color.opacity(0.12))
-                .clipShape(Capsule())
-                .overlay(Capsule().strokeBorder(color.opacity(0.28), lineWidth: 1))
-        }
-    }
-}
-
-// MARK: - Flexible Wrapping View
-
-private struct FlexibleView<Data: Collection, Content: View>: View where Data.Element: Hashable {
-    let data: Data
-    let spacing: CGFloat
-    let alignment: HorizontalAlignment
-    let content: (Data.Element) -> Content
-
-    @State private var totalHeight: CGFloat = .zero
-
-    init(
-        data: Data,
-        spacing: CGFloat = 8,
-        alignment: HorizontalAlignment = .leading,
-        @ViewBuilder content: @escaping (Data.Element) -> Content
-    ) {
-        self.data = data
-        self.spacing = spacing
-        self.alignment = alignment
-        self.content = content
-    }
-
-    var body: some View {
-        GeometryReader { geometry in
-            generateContent(in: geometry)
-        }
-        .frame(height: totalHeight)
-    }
-
-    private func generateContent(in geometry: GeometryProxy) -> some View {
-        var width = CGFloat.zero
-        var height = CGFloat.zero
-        let items = Array(data)
-        let lastItem = items.last
-
-        return ZStack(alignment: Alignment(horizontal: alignment, vertical: .top)) {
-            ForEach(items, id: \.self) { item in
-                content(item)
-                    .padding(.trailing, spacing)
-                    .padding(.bottom, spacing)
-                    .alignmentGuide(.leading) { dimension in
-                        if abs(width - dimension.width - spacing) > geometry.size.width {
-                            width = 0
-                            height -= dimension.height + spacing
-                        }
-
-                        let result = width
-
-                        if item == lastItem {
-                            width = 0
-                        } else {
-                            width -= dimension.width + spacing
-                        }
-
-                        return result
-                    }
-                    .alignmentGuide(.top) { _ in
-                        let result = height
-
-                        if item == lastItem {
-                            height = 0
-                        }
-
-                        return result
-                    }
-            }
-        }
-        .background(
-            GeometryReader { geometry in
-                Color.clear
-                    .onAppear {
-                        totalHeight = geometry.size.height
-                    }
-                    .onChange(of: geometry.size.height) { _, newHeight in
-                        totalHeight = newHeight
-                    }
-            }
-        )
+        LureliaWidgetReloads.reloadAll()
     }
 }

@@ -68,13 +68,6 @@ struct HabitsView: View {
                         .padding(.horizontal, 32)
                     } else {
 
-                        // MARK: - Streak Summary
-
-                        if !activeHabits.isEmpty {
-                            LureliaHabitStreakSummary(habits: activeHabits)
-                                .padding(.horizontal, 24)
-                        }
-
                         // MARK: - Active Habits
 
                         if !activeHabits.isEmpty {
@@ -195,167 +188,21 @@ private struct LureliaHabitsEmptyState: View {
     }
 }
 
-// MARK: - Streak Summary Card
-
-private struct LureliaHabitStreakSummary: View {
-    let habits: [LureliaHabit]
-
-    var body: some View {
-        GlassCard {
-            VStack(alignment: .leading, spacing: 14) {
-                HStack(spacing: 8) {
-                    Image("flame")
-                        .renderingMode(.template)
-                        .resizable()
-                        .scaledToFit()
-                        .frame(width: 22, height: 22)
-                        .foregroundStyle(LGradients.header)
-
-                    Text("Habit Streak")
-                        .font(.system(size: 16, weight: .bold, design: .rounded))
-                        .foregroundStyle(.white)
-                }
-
-                VStack(spacing: 10) {
-                    ForEach(habits) { habit in
-                        HStack {
-                            Text(habit.title)
-                                .font(.system(size: 14, weight: .semibold, design: .rounded))
-                                .foregroundStyle(.white)
-                                .lineLimit(1)
-
-                            Spacer(minLength: 10)
-
-                            HStack(spacing: 6) {
-                                streakPill(label: "DAYS", value: "\(strictDailyStreak(for: habit))")
-                                streakPill(label: "WEEKS", value: "\(strictWeeklyStreak(for: habit))")
-                            }
-                        }
-
-                        if habit.id != habits.last?.id {
-                            Rectangle()
-                                .fill(.white.opacity(0.07))
-                                .frame(height: 1)
-                        }
-                    }
-                }
-            }
-        }
-    }
-
-    private func strictDailyStreak(for habit: LureliaHabit) -> Int {
-        let calendar = Calendar.current
-        let today = calendar.startOfDay(for: Date())
-        let resetStart = habit.statsResetAt.map { calendar.startOfDay(for: $0) }
-        var streak = 0
-        var day = today
-        var checkedToday = false
-
-        while true {
-            let dayStart = calendar.startOfDay(for: day)
-
-            if let resetStart, dayStart <= resetStart {
-                break
-            }
-
-            let completed = (habit.logs ?? []).contains { log in
-                calendar.isDate(log.dayStart, inSameDayAs: dayStart) && log.count >= habit.target
-            }
-
-            if completed {
-                streak += 1
-            } else if checkedToday {
-                break
-            }
-
-            checkedToday = true
-
-            guard let previousDay = calendar.date(byAdding: .day, value: -1, to: day) else {
-                break
-            }
-            day = previousDay
-        }
-
-        return streak
-    }
-
-    private func strictWeeklyStreak(for habit: LureliaHabit) -> Int {
-        let calendar = Calendar.current
-        let today = calendar.startOfDay(for: Date())
-        let resetStart = habit.statsResetAt.map { calendar.startOfDay(for: $0) }
-        var streak = 0
-        var weekAnchor = today
-
-        while true {
-            guard let weekInterval = calendar.dateInterval(of: .weekOfYear, for: weekAnchor) else {
-                break
-            }
-
-            if let resetStart, weekInterval.start <= resetStart {
-                break
-            }
-
-            let completedDaysInWeek = (habit.logs ?? []).filter { log in
-                log.dayStart >= weekInterval.start &&
-                log.dayStart < weekInterval.end &&
-                log.count >= habit.target
-            }.count
-
-            if completedDaysInWeek >= habit.daysPerWeek {
-                streak += 1
-            } else {
-                break
-            }
-
-            guard let previousWeek = calendar.date(byAdding: .weekOfYear, value: -1, to: weekAnchor) else {
-                break
-            }
-            weekAnchor = previousWeek
-        }
-
-        return streak
-    }
-
-    @ViewBuilder
-    private func streakPill(label: String, value: String) -> some View {
-        HStack(spacing: 5) {
-            Text(label)
-                .font(.system(size: 10, weight: .bold, design: .rounded))
-                .foregroundStyle(.white.opacity(0.55))
-            Text(value)
-                .font(.system(size: 11, weight: .bold, design: .rounded))
-                .foregroundStyle(.white)
-        }
-        .padding(.horizontal, 9)
-        .padding(.vertical, 5)
-        .background(.white.opacity(0.08))
-        .clipShape(Capsule())
-        .overlay(Capsule().strokeBorder(.white.opacity(0.14), lineWidth: 1))
-    }
-}
-
 // MARK: - Schedule Form
 
 struct LureliaHabitIconPreview: View {
     let iconName: String
+    /// Optional single-color tint. When `nil`, uses the neutral glass sheet style.
+    var tint: Color? = nil
 
     var body: some View {
         ZStack {
             Circle()
-                .fill(
-                    LinearGradient(
-                        colors: [
-                            LColors.gradientBlue.opacity(0.22),
-                            LColors.gradientPurple.opacity(0.20)
-                        ],
-                        startPoint: .topLeading,
-                        endPoint: .bottomTrailing
-                    )
-                )
+                .fill(fillStyle)
                 .frame(width: 42, height: 42)
 
             Circle()
-                .strokeBorder(LGradients.header, lineWidth: 2.5)
+                .strokeBorder(strokeStyle, lineWidth: 2.5)
                 .frame(width: 42, height: 42)
 
             Group {
@@ -374,17 +221,33 @@ struct LureliaHabitIconPreview: View {
             .foregroundStyle(.white)
         }
     }
+
+    private var fillStyle: AnyShapeStyle {
+        if let tint {
+            return AnyShapeStyle(tint.opacity(0.22))
+        }
+        return AnyShapeStyle(LColors.neutralGlassHighlight.opacity(0.08))
+    }
+
+    private var strokeStyle: AnyShapeStyle {
+        if let tint {
+            return AnyShapeStyle(tint)
+        }
+        return AnyShapeStyle(LColors.neutralGlassHighlight.opacity(0.28))
+    }
 }
 
 struct LureliaHabitIconPickerButton: View {
     @Binding var iconName: String
+    /// Optional tint. `nil` keeps the neutral glass look used by the new-habit sheet.
+    var tint: Color? = nil
     let action: () -> Void
 
     var body: some View {
         Button(action: action) {
-            GlassCard {
+            GlassCard(tint: tint) {
                 HStack(spacing: 12) {
-                    LureliaHabitIconPreview(iconName: iconName)
+                    LureliaHabitIconPreview(iconName: iconName, tint: tint)
 
                     Text("Choose Icon")
                         .font(.system(size: 15, weight: .semibold, design: .rounded))
@@ -403,7 +266,18 @@ struct HabitScheduleForm: View {
     @Binding var daysPerWeek: Int
     @Binding var timesPerDay: Int
     var hideTimesPerDay: Bool
+    /// Optional accent tint; when nil, uses the neutral glass sheet style.
+    var tint: Color? = nil
     var onTimesPerDayChange: (Int) -> Void
+
+    private var activeStyle: AnyShapeStyle {
+        if let tint { return AnyShapeStyle(tint) }
+        return AnyShapeStyle(LColors.neutralGlassHighlight.opacity(0.16))
+    }
+
+    private var countTextColor: Color {
+        tint ?? LColors.neutralPearl.opacity(0.78)
+    }
 
     private let weekdays: [(value: Int, label: String)] = [
         (1, "Sun"),
@@ -416,7 +290,7 @@ struct HabitScheduleForm: View {
     ]
 
     var body: some View {
-        GlassCard {
+        GlassCard(tint: tint) {
             VStack(alignment: .leading, spacing: 18) {
                 VStack(alignment: .leading, spacing: 10) {
                     HStack {
@@ -428,7 +302,7 @@ struct HabitScheduleForm: View {
 
                         Text("\(daysPerWeek) day\(daysPerWeek == 1 ? "" : "s")")
                             .font(.system(size: 13, weight: .semibold, design: .rounded))
-                            .foregroundStyle(LColors.gradientBlue)
+                            .foregroundStyle(countTextColor)
                     }
 
                     HStack(spacing: 6) {
@@ -445,7 +319,7 @@ struct HabitScheduleForm: View {
                                     .frame(height: 36)
                                     .background(
                                         selected
-                                        ? AnyShapeStyle(LGradients.header)
+                                        ? activeStyle
                                         : AnyShapeStyle(Color.white.opacity(0.08))
                                     )
                                     .clipShape(Capsule())
@@ -568,11 +442,19 @@ struct HabitNotificationForm: View {
     var timesPerDay: Int
     var iconName: String = "flame"
     var daysPerWeek: Int
+    /// Optional accent tint; when nil, uses the neutral glass sheet style.
+    var tint: Color? = nil
 
+    private var activeStyle: AnyShapeStyle {
+        if let tint { return AnyShapeStyle(tint) }
+        return AnyShapeStyle(LColors.neutralGlassHighlight.opacity(0.16))
+    }
 
+    private var toggleTint: Color { tint ?? LColors.neutralPearl.opacity(0.72) }
+    private var dateTint: Color { tint ?? LColors.neutralPearl.opacity(0.72) }
 
     var body: some View {
-        GlassCard {
+        GlassCard(tint: tint) {
             VStack(alignment: .leading, spacing: 14) {
 
             // Toggle row
@@ -584,7 +466,7 @@ struct HabitNotificationForm: View {
                 Spacer()
                 Toggle("", isOn: $notificationEnabled)
                     .labelsHidden()
-                    .tint(LColors.gradientPurple)
+                    .tint(toggleTint)
             }
 
             if notificationEnabled {
@@ -594,7 +476,7 @@ struct HabitNotificationForm: View {
                     DatePicker("", selection: $startDate, displayedComponents: .date)
                         .labelsHidden()
                         .datePickerStyle(.compact)
-                        .tint(LColors.gradientBlue)
+                        .tint(dateTint)
                 }
 
                 // Kind pills
@@ -612,7 +494,7 @@ struct HabitNotificationForm: View {
                                     .padding(.vertical, 8)
                                     .background(
                                         on
-                                        ? AnyShapeStyle(LGradients.header)
+                                        ? activeStyle
                                         : AnyShapeStyle(Color.white.opacity(0.08))
                                     )
                                     .clipShape(Capsule())

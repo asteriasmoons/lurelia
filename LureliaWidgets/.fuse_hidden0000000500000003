@@ -1,0 +1,73 @@
+//
+//  SkipHabitWidgetIntent.swift
+//  Lurelia
+//
+
+import Foundation
+import AppIntents
+import WidgetKit
+import SwiftData
+
+struct SkipHabitWidgetIntent: AppIntent {
+    static var title: LocalizedStringResource = "Skip Habit"
+    static var description = IntentDescription("Skips a habit for today from the widget.")
+
+    @Parameter(title: "Habit ID")
+    var habitID: String
+
+    init() { }
+
+    init(habitID: String) {
+        self.habitID = habitID
+    }
+
+    func perform() async throws -> some IntentResult {
+        print("🟣 [WidgetIntent] SkipHabit perform — habitID=\(habitID)")
+        guard let id = UUID(uuidString: habitID) else {
+            print("🟣 [WidgetIntent] SkipHabit — invalid UUID, bailing")
+            return .result()
+        }
+
+        let container = try LureliaWidgetShared.makeIntentModelContainer()
+        let context = ModelContext(container)
+
+        let descriptor = FetchDescriptor<LureliaHabit>(
+            predicate: #Predicate<LureliaHabit> { habit in
+                habit.id == id
+            }
+        )
+
+        guard let habit = try context.fetch(descriptor).first else {
+            return .result()
+        }
+
+        skipHabitToday(habit, in: context)
+        try context.save()
+
+        WidgetCenter.shared.reloadTimelines(ofKind: "LureliaHabitsWidget")
+        WidgetCenter.shared.reloadTimelines(ofKind: "LureliaKanbanTimelineWidget")
+
+        return .result()
+    }
+
+    private func skipHabitToday(_ habit: LureliaHabit, in context: ModelContext) {
+        let calendar = Calendar.current
+        let todayStart = calendar.startOfDay(for: Date())
+
+        // Don't skip if already logged today
+        let hasLog = (habit.logs ?? []).contains { log in
+            calendar.isDate(log.dayStart, inSameDayAs: todayStart)
+        }
+        guard !hasLog else { return }
+
+        // Don't skip if already skipped today
+        let hasSkip = (habit.skips ?? []).contains { skip in
+            calendar.isDate(skip.dayStart, inSameDayAs: todayStart)
+        }
+        guard !hasSkip else { return }
+
+        let skip = LureliaHabitSkip(habit: habit, dayStart: todayStart)
+        context.insert(skip)
+        habit.updatedAt = Date()
+    }
+}

@@ -32,18 +32,7 @@ struct CalendarView: View {
             VStack(alignment: .leading, spacing: 16) {
                 header
 
-                LazyVGrid(columns: columns, spacing: 8) {
-                    ForEach(weekdaySymbols, id: \.self) { symbol in
-                        Text(symbol.uppercased())
-                            .font(.system(size: 11, weight: .black, design: .rounded))
-                            .foregroundStyle(LColors.textSecondary.opacity(0.65))
-                            .frame(maxWidth: .infinity)
-                    }
-
-                    ForEach(days) { day in
-                        dayBubble(day)
-                    }
-                }
+                dayGrid
             }
         }
         .padding(.horizontal, 20)
@@ -63,77 +52,116 @@ struct CalendarView: View {
 
             Spacer()
 
-            HStack(spacing: 10) {
-                Button {
-                    moveMonth(-1)
-                } label: {
-                    Image("chevleft")
-                        .renderingMode(.template)
-                        .resizable()
-                        .scaledToFit()
-                        .foregroundStyle(LColors.textPrimary)
-                        .frame(width: 14, height: 14)
-                        .frame(width: 34, height: 34)
-                        .background(LColors.glassSurface2, in: Circle())
-                        .overlay(Circle().strokeBorder(LColors.glassBorder, lineWidth: 1))
-                }
-                .buttonStyle(.plain)
+            headerControls
+        }
+    }
 
-                Button {
-                    withAnimation(.spring(response: 0.28, dampingFraction: 0.82)) {
-                        displayedMonth = Date()
+    private var headerControls: some View {
+        HStack(spacing: 10) {
+            Button {
+                moveMonth(-1)
+            } label: {
+                Image("chevleft")
+                    .renderingMode(.template)
+                    .resizable()
+                    .scaledToFit()
+                    .foregroundStyle(Color.white.opacity(0.90))
+                    .frame(width: 16, height: 16)
+                .frame(width: 34, height: 34)
+            }
+            .buttonStyle(.plain)
+
+            Button {
+                withAnimation(.spring(response: 0.28, dampingFraction: 0.82)) {
+                    displayedMonth = Date()
+                }
+            } label: {
+                Text("Today")
+                    .font(.system(size: 12, weight: .black, design: .rounded))
+                    .foregroundStyle(Color.white.opacity(0.90))
+                    .padding(.horizontal, 10)
+                    .frame(height: 30)
+                    .fixedSize(horizontal: true, vertical: false)
+                    .background {
+                        Capsule(style: .continuous)
+                            .fill(LColors.neutralGlassHighlight.opacity(0.045))
+                            .overlay {
+                                Capsule(style: .continuous)
+                                    .strokeBorder(LColors.neutralGlassHighlight.opacity(0.22), lineWidth: 1)
+                            }
                     }
-                } label: {
-                    Text("Today")
-                        .font(.system(size: 12, weight: .black, design: .rounded))
-                        .foregroundStyle(.white)
-                        .padding(.horizontal, 12)
-                        .frame(height: 34)
-                        .background(Capsule().fill(LGradients.header))
-                }
-                .buttonStyle(.plain)
+            }
+            .buttonStyle(.plain)
 
-                Button {
-                    moveMonth(1)
-                } label: {
-                    Image("chevright")
-                        .renderingMode(.template)
-                        .resizable()
-                        .scaledToFit()
-                        .foregroundStyle(LColors.textPrimary)
-                        .frame(width: 14, height: 14)
-                        .frame(width: 34, height: 34)
-                        .background(LColors.glassSurface2, in: Circle())
-                        .overlay(Circle().strokeBorder(LColors.glassBorder, lineWidth: 1))
-                }
-                .buttonStyle(.plain)
+            Button {
+                moveMonth(1)
+            } label: {
+                Image("chevright")
+                    .renderingMode(.template)
+                    .resizable()
+                    .scaledToFit()
+                    .foregroundStyle(Color.white.opacity(0.90))
+                    .frame(width: 16, height: 16)
+                .frame(width: 34, height: 34)
+            }
+            .buttonStyle(.plain)
+        }
+    }
+
+    private var dayGrid: some View {
+        calendarGridContent
+    }
+
+    private var calendarGridContent: some View {
+        LazyVGrid(columns: columns, spacing: 8) {
+            ForEach(weekdaySymbols, id: \.self) { symbol in
+                Text(symbol.uppercased())
+                    .font(.system(size: 11, weight: .black, design: .rounded))
+                    .foregroundStyle(LColors.textSecondary.opacity(0.65))
+                    .frame(maxWidth: .infinity)
+            }
+
+            ForEach(days) { day in
+                dayBubble(day)
             }
         }
     }
 
     private func dayBubble(_ day: CalendarDayBubble) -> some View {
-        Text(day.numberText)
-            .font(.system(size: 13, weight: day.isToday ? .black : .bold, design: .rounded))
-            .foregroundStyle(dayForeground(for: day))
-            .frame(maxWidth: .infinity)
-            .frame(height: 34)
-            .background {
-                Circle()
-                    .fill(day.isToday ? AnyShapeStyle(LGradients.header) : AnyShapeStyle(LColors.glassSurface2.opacity(day.isCurrentMonth ? 0.95 : 0.35)))
-            }
-            .overlay {
-                Circle()
-                    .strokeBorder(
-                        day.isToday ? .white.opacity(0.35) : LColors.glassBorder.opacity(day.isCurrentMonth ? 0.85 : 0.35),
-                        lineWidth: 1
-                    )
-            }
-            .opacity(day.isCurrentMonth ? 1 : 0.35)
+        ZStack {
+            Circle()
+                .fill(dayCircleFill(for: day))
+                .overlay {
+                    Circle()
+                        .strokeBorder(dayCircleStroke(for: day), lineWidth: day.isToday ? 1.2 : 1)
+                }
+
+            Text(day.numberText)
+                .font(.system(size: 13, weight: day.isToday ? .black : .bold, design: .rounded))
+                .foregroundStyle(dayForeground(for: day))
+        }
+        .frame(maxWidth: .infinity)
+        .frame(height: 34)
+        .opacity(day.isCurrentMonth ? 1 : 0.35)
     }
 
     private func dayForeground(for day: CalendarDayBubble) -> Color {
         if day.isToday { return .white }
         return day.isCurrentMonth ? LColors.textPrimary : LColors.textSecondary
+    }
+
+    private func dayCircleFill(for day: CalendarDayBubble) -> AnyShapeStyle {
+        if day.isToday {
+            return AnyShapeStyle(LColors.neutralGlassHighlight.opacity(0.065))
+        }
+        return AnyShapeStyle(LColors.neutralGlassHighlight.opacity(day.isCurrentMonth ? 0.035 : 0.02))
+    }
+
+    private func dayCircleStroke(for day: CalendarDayBubble) -> AnyShapeStyle {
+        if day.isToday {
+            return AnyShapeStyle(LColors.neutralPearl.opacity(0.68))
+        }
+        return AnyShapeStyle(LColors.neutralGlassHighlight.opacity(day.isCurrentMonth ? 0.16 : 0.08))
     }
 
     private func moveMonth(_ value: Int) {
@@ -179,7 +207,7 @@ private struct CalendarDayBubble: Identifiable {
 
 #Preview {
     ZStack {
-        LureliaBackground()
+        LureliaBackgroundAlt()
         CalendarView()
     }
 }

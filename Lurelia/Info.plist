@@ -4,6 +4,12 @@
 <dict>
 	<key>ITSAppUsesNonExemptEncryption</key>
 	<false/>
+	<key>NSAlarmKitUsageDescription</key>
+	<string>Lurelia uses alarms when you turn them on for reminders that need a stronger sound and system alert.</string>
+	<key>NSCalendarsFullAccessUsageDescription</key>
+	<string>Lurelia uses calendar access to show Apple Calendar events beside your Lurelia events and sync events when you turn syncing on.</string>
+	<key>NSCalendarsUsageDescription</key>
+	<string>Lurelia uses calendar access to show Apple Calendar events beside your Lurelia events.</string>
 	<key>UIBackgroundModes</key>
 	<array>
 		<string>remote-notification</string>

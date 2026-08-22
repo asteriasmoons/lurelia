@@ -273,7 +273,7 @@ extension OnboardingView {
                 Image(systemName: "arrow.right")
                     .font(.system(size: 14, weight: .bold))
             }
-            .foregroundStyle(.white)
+            .foregroundStyle(Color.white.adaptivePrimaryText)
             .frame(maxWidth: .infinity)
             .frame(height: 62)
             .background(
@@ -285,7 +285,7 @@ extension OnboardingView {
                     .stroke(Color.white.opacity(0.12), lineWidth: 1)
             )
             .shadow(
-                color: LColors.gradientPurple.opacity(0.25),
+                color: Color.white.opacity(0.85).opacity(0.25),
                 radius: 18,
                 y: 10
             )

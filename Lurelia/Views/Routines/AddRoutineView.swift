@@ -93,6 +93,7 @@ struct AddRoutineView: View {
     
     private var isEditing: Bool { editingRoutine != nil }
     private var canSave: Bool { !name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
+    private var selectedColorFillTextColor: Color { selectedColor.wcagContrastingSolidTextColor }
     
     var body: some View {
         NavigationStack {
@@ -118,20 +119,20 @@ struct AddRoutineView: View {
                                     Button {
                                         withAnimation(.spring(response: 0.25, dampingFraction: 0.8)) { timeOfDay = tod }
                                     } label: {
-                                        Text(tod.rawValue)
-                                            .font(.system(size: 12, weight: .semibold, design: .rounded))
-                                            .foregroundStyle(isSelected ? .white : LColors.textPrimary)
-                                            .frame(maxWidth: .infinity)
-                                            .padding(.vertical, 9)
-                                            .background(
-                                                isSelected ? AnyShapeStyle(LGradients.header) : AnyShapeStyle(LColors.glassSurface),
-                                                in: RoundedRectangle(cornerRadius: LSpacing.inputRadius)
-                                            )
-                                            .overlay(
-                                                RoundedRectangle(cornerRadius: LSpacing.inputRadius)
-                                                    .strokeBorder(isSelected ? LColors.glassBorderStrong : LColors.glassBorder, lineWidth: 1)
-                                            )
-                                    }
+                                    Text(tod.rawValue)
+                                        .font(.system(size: 12, weight: .semibold, design: .rounded))
+                                        .foregroundStyle(isSelected ? .white : LColors.textPrimary)
+                                        .frame(maxWidth: .infinity)
+                                        .padding(.vertical, 9)
+                                        .background(
+                                            isSelected ? AnyShapeStyle(LColors.neutralGlassHighlight.opacity(0.12)) : AnyShapeStyle(LColors.glassSurface),
+                                            in: RoundedRectangle(cornerRadius: LSpacing.inputRadius)
+                                        )
+                                        .overlay(
+                                            RoundedRectangle(cornerRadius: LSpacing.inputRadius)
+                                                .strokeBorder(isSelected ? LColors.neutralPearl.opacity(0.36) : LColors.glassBorder, lineWidth: 1)
+                                        )
+                                }
                                     .buttonStyle(.plain)
                                 }
                             }
@@ -248,6 +249,13 @@ struct AddRoutineView: View {
                                         .font(.system(size: 11, design: .rounded))
                                         .foregroundStyle(LColors.textSecondary)
                                 }
+                            }
+                            .onChange(of: phasesEnabled) { oldValue, newValue in
+                                guard oldValue, !newValue else { return }
+                                // Populate the non-phase task editor immediately so tasks
+                                // remain visible when the toggle is turned off. The save path
+                                // still preserves the original SwiftData task objects in-place.
+                                routineTasks = phaseDrafts.flatMap(\.tasks)
                             }
                             .tint(LColors.gradientBlue)
                         }
@@ -442,7 +450,9 @@ struct AddRoutineView: View {
                     .padding(.horizontal)
                     .padding(.top, 16)
                     .padding(.bottom, 40)
+                    .routinePageWidthLocked()
                 }
+                .routinePageScrollClipped()
                 .scrollDismissesKeyboard(.interactively)
             }
             .navigationTitle(isEditing ? "Edit Routine" : "New Routine")
@@ -500,23 +510,13 @@ struct AddRoutineView: View {
     private var addTaskSheet: some View {
         if let editIndex = editingRoutineTaskIndex {
             AddCustomRoutineTaskView(
-                initialTaskName: routineTasks[editIndex].name,
-                initialNotes: routineTasks[editIndex].notes,
-                initialIcon: routineTasks[editIndex].icon
-            ) { name, notes, icon in
-                routineTasks[editIndex].name = name
-                routineTasks[editIndex].notes = notes
-                routineTasks[editIndex].icon = icon
+                initialDraft: routineTasks[editIndex]
+            ) { draft in
+                routineTasks[editIndex] = draft
             }
         } else {
-            AddCustomRoutineTaskView { name, notes, icon in
-                routineTasks.append(
-                    LureliaRoutineTaskDraft(
-                        name: name,
-                        icon: icon,
-                        notes: notes
-                    )
-                )
+            AddCustomRoutineTaskView { draft in
+                routineTasks.append(draft)
             }
         }
     }
@@ -527,38 +527,24 @@ struct AddRoutineView: View {
             switch target.mode {
 
             case .add:
-                AddCustomRoutineTaskView { name, notes, icon in
-                    phaseDrafts[target.phaseIndex].tasks.append(
-                        LureliaRoutineTaskDraft(
-                            name: name,
-                            icon: icon,
-                            notes: notes
-                        )
-                    )
+                AddCustomRoutineTaskView { draft in
+                    phaseDrafts[target.phaseIndex].tasks.append(draft)
 
                     print("Added phase task")
-                    print("Phase:", target.phaseIndex)
+                    print("Phase:", target.phaseIndex + 1)
                     print("Task Count:", phaseDrafts[target.phaseIndex].tasks.count)
                     print(phaseDrafts[target.phaseIndex].tasks.map(\.name))
                 }
 
             case .edit(let taskIndex):
                 if taskIndex < phaseDrafts[target.phaseIndex].tasks.count {
-                    let draft = phaseDrafts[target.phaseIndex].tasks[taskIndex]
-
                     AddCustomRoutineTaskView(
-                        initialTaskName: draft.name,
-                        initialNotes: draft.notes,
-                        initialIcon: draft.icon
-                    ) { name, notes, icon in
-                        phaseDrafts[target.phaseIndex].tasks[taskIndex] = LureliaRoutineTaskDraft(
-                            name: name,
-                            icon: icon,
-                            notes: notes
-                        )
+                        initialDraft: phaseDrafts[target.phaseIndex].tasks[taskIndex]
+                    ) { draft in
+                        phaseDrafts[target.phaseIndex].tasks[taskIndex] = draft
 
                         print("Edited phase task")
-                        print("Phase:", target.phaseIndex)
+                        print("Phase:", target.phaseIndex + 1)
                         print("Task Count:", phaseDrafts[target.phaseIndex].tasks.count)
                     }
                 } else {
@@ -586,13 +572,7 @@ struct AddRoutineView: View {
                 .background(LColors.glassSurface, in: RoundedRectangle(cornerRadius: LSpacing.cardRadius))
                 .overlay(
                     RoundedRectangle(cornerRadius: LSpacing.cardRadius)
-                        .strokeBorder(
-                            LinearGradient(
-                                colors: [LColors.gradientBlue.opacity(0.95), LColors.gradientPurple.opacity(0.95), Color.white.opacity(0.55)],
-                                startPoint: .topLeading, endPoint: .bottomTrailing
-                            ),
-                            lineWidth: 1.15
-                        )
+                        .strokeBorder(LColors.glassBorder, lineWidth: 1.15)
                 )
         }
     }
@@ -620,7 +600,15 @@ struct AddRoutineView: View {
                     } label: {
                         Text(day.label)
                             .font(.system(size: 11, weight: .bold, design: .rounded))
-                            .foregroundStyle(LColors.textPrimary)
+                            .foregroundStyle(
+                                selectedDays.wrappedValue.contains(day.value)
+                                ? selectedColorFillTextColor
+                                : LColors.textPrimary
+                            )
+                            .wcagContrastLift(
+                                on: selectedColor,
+                                isActive: selectedDays.wrappedValue.contains(day.value)
+                            )
                             .frame(width: 34, height: 34)
                             .background(
                                 selectedDays.wrappedValue.contains(day.value) ? selectedColor.opacity(0.5) : LColors.glassSurface,
@@ -927,14 +915,48 @@ struct AddRoutineView: View {
                 let phaseIDString = phase.id.uuidString
                 draft.tasks = routine.sortedTasks
                     .filter { $0.phaseID == phaseIDString }
-                    .map { LureliaRoutineTaskDraft(name: $0.title, icon: $0.icon, notes: $0.notes) }
+                    .map { makeTaskDraft(from: $0) }
                 return draft
             }
         } else {
-            routineTasks = routine.sortedTasks.map {
-                LureliaRoutineTaskDraft(name: $0.title, icon: $0.icon, notes: $0.notes)
-            }
+            routineTasks = routine.sortedTasks.map { makeTaskDraft(from: $0) }
         }
+    }
+
+    /// Builds a full task draft from an existing task so that EDITING a routine
+    /// preserves every field (blueprint, schedule, notifications, alarm, and the
+    /// step / supply / obstacle children) instead of wiping them on save.
+    private func makeTaskDraft(from task: LureliaRoutineTask) -> LureliaRoutineTaskDraft {
+        var d = LureliaRoutineTaskDraft(name: task.title, icon: task.icon, notes: task.notes)
+
+        d.context = task.context
+        d.purpose = task.purpose
+        d.motivation = task.motivation
+        d.trigger = task.trigger
+        d.triggerType = task.triggerType
+        d.triggerReason = task.triggerReason
+        d.environment = task.environment
+        d.reward = task.reward
+        d.consequence = task.consequence
+        d.recoveryPlan = task.recoveryPlan
+
+        d.hasDueTime = task.hasDueTime
+        d.dueHour = task.dueHour
+        d.dueMinute = task.dueMinute
+        d.estimatedDurationMinutes = task.estimatedDurationMinutes
+        d.repeatsOnDays = task.repeatsOnDays
+        d.scheduledDays = task.scheduledDays
+
+        d.notificationsEnabled = task.notificationsEnabled
+        d.notificationLeadMinutes = task.notificationLeadMinutes
+        d.alarmEnabled = task.alarmEnabled
+        d.alarmSoundName = task.alarmSoundName ?? LureliaReminderAlarmSound.defaultSound.fileName
+
+        d.steps = task.sortedSteps.map { StepDraft(id: $0.id, title: $0.title, isCompleted: $0.isCompleted) }
+        d.supplies = task.sortedSupplies.map { SupplyDraft(id: $0.id, name: $0.name) }
+        d.obstacles = task.sortedObstacles.map { ObstacleDraft(id: $0.id, obstacle: $0.obstacle, solution: $0.solution) }
+
+        return d
     }
     
     // MARK: - Save
@@ -945,6 +967,8 @@ struct AddRoutineView: View {
         
         let routine: LureliaRoutine
         
+        let isDisablingPhases = editingRoutine?.phasesEnabled == true && !phasesEnabled
+
         if let existing = editingRoutine {
             existing.name = trimmed
             existing.icon = selectedIcon
@@ -965,9 +989,27 @@ struct AddRoutineView: View {
             existing.durationMinutesOverride = durationMinutesOverride
             existing.updatedAt = Date()
             
-            // Delete old tasks and phases
-            (existing.tasks ?? []).forEach { modelContext.delete($0) }
-            (existing.phases ?? []).forEach { modelContext.delete($0) }
+            if isDisablingPhases {
+                // Keep the existing task model objects so their identity, history,
+                // completion state, Kanban references, notification IDs, etc. survive.
+                let flattenedTasks = existing.sortedPhases.flatMap { phase in
+                    let phaseIDString = phase.id.uuidString
+                    return existing.sortedTasks.filter { $0.phaseID == phaseIDString }
+                }
+
+                for (index, task) in flattenedTasks.enumerated() {
+                    task.phaseID = nil
+                    task.sortOrder = index
+                    task.updatedAt = Date()
+                }
+
+                // The phase containers can now be removed; tasks themselves stay intact.
+                (existing.phases ?? []).forEach { modelContext.delete($0) }
+            } else {
+                // Normal edit path: rebuild tasks/phases from the current drafts.
+                (existing.tasks ?? []).forEach { modelContext.delete($0) }
+                (existing.phases ?? []).forEach { modelContext.delete($0) }
+            }
             
             routine = existing
         } else {
@@ -990,7 +1032,9 @@ struct AddRoutineView: View {
             routine.phasesEnabled = phasesEnabled
         }
         
-        if phasesEnabled {
+        if isDisablingPhases {
+            // Existing task objects were flattened in-place above; do not recreate them.
+        } else if phasesEnabled {
             // Create phases and their tasks
             for (phaseIndex, draft) in phaseDrafts.enumerated() {
                 let phase = LureliaRoutinePhase(
@@ -1019,6 +1063,7 @@ struct AddRoutineView: View {
                     task.phaseID = phaseIDString
                     task.routine = routine
                     modelContext.insert(task)
+                    applyTaskDraft(taskDraft, to: task)
                 }
             }
         } else {
@@ -1031,12 +1076,22 @@ struct AddRoutineView: View {
                 )
                 task.routine = routine
                 modelContext.insert(task)
+                applyTaskDraft(draft, to: task)
             }
         }
-        
-        try? modelContext.save()
+
+        do {
+            try modelContext.save()
+        } catch {
+            print("🚨 [AddRoutine] SAVE FAILED (routine + tasks): \(error)")
+        }
         let reminderSyncResults = syncRoutineReminders(for: routine)
-        try? modelContext.save()
+        do {
+            try modelContext.save()
+        } catch {
+            print("🚨 [AddRoutine] SAVE FAILED (reminder sync): \(error)")
+        }
+        scheduleRoutineTaskNotifications(for: routine)
         if editingRoutine == nil { onCreated?(routine) }
         
         Task {
@@ -1054,8 +1109,93 @@ struct AddRoutineView: View {
         dismiss()
     }
     
+    // MARK: - Task Draft Mapping
+
+    /// Copies every blueprint / schedule / notification field from a task draft
+    /// onto a freshly-created LureliaRoutineTask and materializes its child
+    /// step / supply / obstacle models.
+    private func applyTaskDraft(_ draft: LureliaRoutineTaskDraft, to task: LureliaRoutineTask) {
+        task.notes = draft.notes.trimmingCharacters(in: .whitespacesAndNewlines)
+
+        task.context = draft.context.trimmingCharacters(in: .whitespacesAndNewlines)
+        task.purpose = draft.purpose.trimmingCharacters(in: .whitespacesAndNewlines)
+        task.motivation = draft.motivation.trimmingCharacters(in: .whitespacesAndNewlines)
+        task.trigger = draft.trigger.trimmingCharacters(in: .whitespacesAndNewlines)
+        task.triggerType = draft.triggerType
+        task.triggerReason = draft.triggerReason.trimmingCharacters(in: .whitespacesAndNewlines)
+        task.environment = draft.environment.trimmingCharacters(in: .whitespacesAndNewlines)
+        task.reward = draft.reward.trimmingCharacters(in: .whitespacesAndNewlines)
+        task.consequence = draft.consequence.trimmingCharacters(in: .whitespacesAndNewlines)
+        task.recoveryPlan = draft.recoveryPlan.trimmingCharacters(in: .whitespacesAndNewlines)
+
+        task.hasDueTime = draft.hasDueTime
+        task.dueHour = draft.dueHour
+        task.dueMinute = draft.dueMinute
+        task.estimatedDurationMinutes = max(0, draft.estimatedDurationMinutes)
+        task.repeatsOnDays = draft.repeatsOnDays
+        task.scheduledDays = draft.scheduledDays.sorted()
+
+        task.notificationsEnabled = draft.notificationsEnabled && draft.hasDueTime
+        task.notificationLeadMinutes = draft.notificationLeadMinutes.sorted()
+        task.alarmEnabled = draft.alarmEnabled && draft.hasDueTime
+        task.alarmSoundName = (draft.alarmEnabled && draft.hasDueTime) ? draft.alarmSoundName : nil
+
+        for (i, s) in draft.steps.enumerated()
+        where !s.title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            let step = LureliaRoutineTaskStep(
+                title: s.title.trimmingCharacters(in: .whitespacesAndNewlines),
+                isCompleted: s.isCompleted,
+                sortOrder: i
+            )
+            step.id = s.id
+            modelContext.insert(step)
+            step.task = task
+            if task.stepItems == nil { task.stepItems = [] }
+            task.stepItems?.append(step)
+        }
+
+        for (i, s) in draft.supplies.enumerated()
+        where !s.name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            let supply = LureliaRoutineTaskSupply(
+                name: s.name.trimmingCharacters(in: .whitespacesAndNewlines),
+                sortOrder: i
+            )
+            supply.id = s.id
+            modelContext.insert(supply)
+            supply.task = task
+            if task.supplyItems == nil { task.supplyItems = [] }
+            task.supplyItems?.append(supply)
+        }
+
+        for (i, o) in draft.obstacles.enumerated()
+        where !o.obstacle.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            let obstacle = LureliaRoutineTaskObstacle(
+                obstacle: o.obstacle.trimmingCharacters(in: .whitespacesAndNewlines),
+                solution: o.solution.trimmingCharacters(in: .whitespacesAndNewlines),
+                sortOrder: i
+            )
+            obstacle.id = o.id
+            modelContext.insert(obstacle)
+            obstacle.task = task
+            if task.obstacleItems == nil { task.obstacleItems = [] }
+            task.obstacleItems?.append(obstacle)
+        }
+    }
+
+    /// After the routine is saved, schedule per-task notifications / alarms for
+    /// any task that has its own due time configured.
+    private func scheduleRoutineTaskNotifications(for routine: LureliaRoutine) {
+        let tasks = (routine.tasks ?? []).filter { $0.hasDueTime }
+        guard !tasks.isEmpty else { return }
+        Task { @MainActor in
+            for task in tasks {
+                RoutineTaskManager.shared.sync(task: task)
+            }
+        }
+    }
+
     // MARK: - Reminder Sync
-    
+
     private func syncRoutineReminders(for routine: LureliaRoutine) -> [RoutineReminderSyncResult] {
         let routineID = routine.persistentModelID.hashValue.description
         let reminderConfigs: [(key: String, title: String, note: String, hour: Int, minute: Int)] = [
@@ -1110,6 +1250,10 @@ struct PhaseScheduleSheet: View {
     @Environment(\.dismiss) private var dismiss
     @Binding var draft: LureliaRoutinePhaseDraft
     let tintColor: Color
+
+    private var tintFillTextColor: Color {
+        tintColor.wcagContrastingSolidTextColor
+    }
     
     var body: some View {
         NavigationStack {
@@ -1142,7 +1286,15 @@ struct PhaseScheduleSheet: View {
                                             } label: {
                                                 Text(day.label)
                                                     .font(.system(size: 11, weight: .bold, design: .rounded))
-                                                    .foregroundStyle(LColors.textPrimary)
+                                                    .foregroundStyle(
+                                                        draft.scheduledDays.contains(day.value)
+                                                        ? tintFillTextColor
+                                                        : LColors.textPrimary
+                                                    )
+                                                    .wcagContrastLift(
+                                                        on: tintColor,
+                                                        isActive: draft.scheduledDays.contains(day.value)
+                                                    )
                                                     .frame(width: 34, height: 34)
                                                     .background(
                                                         draft.scheduledDays.contains(day.value) ? tintColor.opacity(0.5) : LColors.glassSurface,
@@ -1192,18 +1344,14 @@ struct PhaseScheduleSheet: View {
                             .background(LColors.glassSurface, in: RoundedRectangle(cornerRadius: LSpacing.cardRadius))
                             .overlay(
                                 RoundedRectangle(cornerRadius: LSpacing.cardRadius)
-                                    .strokeBorder(
-                                        LinearGradient(
-                                            colors: [LColors.gradientBlue.opacity(0.95), LColors.gradientPurple.opacity(0.95), Color.white.opacity(0.55)],
-                                            startPoint: .topLeading, endPoint: .bottomTrailing
-                                        ),
-                                        lineWidth: 1.15
-                                    )
+                                    .strokeBorder(LColors.glassBorder, lineWidth: 1.15)
                             )
                         }
                     }
                     .padding(.horizontal).padding(.top, 16).padding(.bottom, 40)
+                    .routinePageWidthLocked()
                 }
+                .routinePageScrollClipped()
             }
             .navigationTitle("Phase Schedule")
             .navigationBarTitleDisplayMode(.inline)
@@ -1221,62 +1369,138 @@ struct PhaseScheduleSheet: View {
 
 struct AddCustomRoutineTaskView: View {
     @Environment(\.dismiss) private var dismiss
-    let onAdd: (String, String, String) -> Void
+
+    let onSave: (LureliaRoutineTaskDraft) -> Void
+
     private let isEditing: Bool
+    private let baseDraft: LureliaRoutineTaskDraft
+
+    // Core
     @State private var taskName: String
     @State private var notes: String
+    @State private var taskContext: String
     @State private var selectedIcon: String
-    @State private var showIconPicker = false
 
-    init(initialTaskName: String = "", initialNotes: String = "", initialIcon: String = "sparkle", onAdd: @escaping (String, String, String) -> Void) {
-        self.onAdd = onAdd
-        self.isEditing = !initialTaskName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-        _taskName = State(initialValue: initialTaskName)
-        _notes = State(initialValue: initialNotes)
-        _selectedIcon = State(initialValue: initialIcon)
+    // Blueprint
+    @State private var purpose: String
+    @State private var motivation: String
+    @State private var trigger: String
+    @State private var triggerType: LureliaCueType?
+    @State private var triggerReason: String
+    @State private var environment: String
+    @State private var reward: String
+    @State private var consequence: String
+    @State private var recoveryPlan: String
+
+    // Schedule
+    @State private var hasDueTime: Bool
+    @State private var dueHour: Int
+    @State private var dueMinute: Int
+    @State private var estimatedDuration: Int
+    @State private var repeatsOnDays: Bool
+    @State private var scheduledDays: Set<Int>
+
+    // Notifications & Alarm
+    @State private var notificationsEnabled: Bool
+    @State private var leadMinutes: Set<Int>
+    @State private var alarmEnabled: Bool
+    @State private var alarmSoundName: String
+
+    // Structured content
+    @State private var steps: [StepDraft]
+    @State private var supplies: [SupplyDraft]
+    @State private var obstacles: [ObstacleDraft]
+
+    init(
+        initialDraft: LureliaRoutineTaskDraft = LureliaRoutineTaskDraft(name: ""),
+        onSave: @escaping (LureliaRoutineTaskDraft) -> Void
+    ) {
+        self.onSave = onSave
+        self.baseDraft = initialDraft
+        self.isEditing = !initialDraft.name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+
+        _taskName = State(initialValue: initialDraft.name)
+        _notes = State(initialValue: initialDraft.notes)
+        _taskContext = State(initialValue: initialDraft.context)
+        _selectedIcon = State(initialValue: initialDraft.icon)
+
+        _purpose = State(initialValue: initialDraft.purpose)
+        _motivation = State(initialValue: initialDraft.motivation)
+        _trigger = State(initialValue: initialDraft.trigger)
+        _triggerType = State(initialValue: initialDraft.triggerType)
+        _triggerReason = State(initialValue: initialDraft.triggerReason)
+        _environment = State(initialValue: initialDraft.environment)
+        _reward = State(initialValue: initialDraft.reward)
+        _consequence = State(initialValue: initialDraft.consequence)
+        _recoveryPlan = State(initialValue: initialDraft.recoveryPlan)
+
+        _hasDueTime = State(initialValue: initialDraft.hasDueTime)
+        _dueHour = State(initialValue: initialDraft.dueHour)
+        _dueMinute = State(initialValue: initialDraft.dueMinute)
+        _estimatedDuration = State(initialValue: max(0, initialDraft.estimatedDurationMinutes))
+        _repeatsOnDays = State(initialValue: initialDraft.repeatsOnDays)
+        _scheduledDays = State(initialValue: Set(initialDraft.scheduledDays))
+
+        _notificationsEnabled = State(initialValue: initialDraft.notificationsEnabled)
+        _leadMinutes = State(initialValue: Set(initialDraft.notificationLeadMinutes))
+        _alarmEnabled = State(initialValue: initialDraft.alarmEnabled)
+        _alarmSoundName = State(initialValue: initialDraft.alarmSoundName)
+
+        _steps = State(initialValue: initialDraft.steps)
+        _supplies = State(initialValue: initialDraft.supplies)
+        _obstacles = State(initialValue: initialDraft.obstacles)
     }
+
     private var canAdd: Bool { !taskName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
-    
+
     var body: some View {
         NavigationStack {
             ZStack {
                 LureliaBackgroundAlt()
-                    .onTapGesture { UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil) }
+                    .ignoresSafeArea()
+                    .routineDismissKeyboardOnTap()
+
                 ScrollView(showsIndicators: false) {
-                    VStack(spacing: 20) {
-                        VStack(alignment: .leading, spacing: 10) {
-                            Text("Task Name").font(.system(size: 14, weight: .semibold, design: .rounded)).foregroundStyle(LColors.textSecondary)
-                            TextField("e.g. Wipe down surfaces", text: $taskName)
-                                .font(.system(size: 15, design: .rounded)).foregroundStyle(LColors.textPrimary)
-                                .padding(14).background(LColors.glassSurface, in: RoundedRectangle(cornerRadius: LSpacing.cardRadius))
-                                .overlay(RoundedRectangle(cornerRadius: LSpacing.cardRadius).strokeBorder(LColors.glassBorder, lineWidth: 1))
-                        }
-                        VStack(alignment: .leading, spacing: 10) {
-                            Text("Icon").font(.system(size: 14, weight: .semibold, design: .rounded)).foregroundStyle(LColors.textSecondary)
-                            Button { showIconPicker = true } label: {
-                                HStack(spacing: 14) {
-                                    LureliaIconView(iconId: selectedIcon, size: 26).foregroundStyle(LColors.textPrimary)
-                                        .frame(width: 44, height: 44).background(LColors.glassSurface2, in: RoundedRectangle(cornerRadius: LSpacing.inputRadius))
-                                    Text("Choose icon").font(.system(size: 14, design: .rounded)).foregroundStyle(LColors.textSecondary)
-                                    Spacer()
-                                    Image("chevright").renderingMode(.template).resizable().scaledToFit()
-                                        .frame(width: 13, height: 13).foregroundStyle(LColors.textSecondary.opacity(0.55))
-                                }.padding(14).background(LColors.glassSurface, in: RoundedRectangle(cornerRadius: LSpacing.cardRadius))
-                                .overlay(RoundedRectangle(cornerRadius: LSpacing.cardRadius).strokeBorder(LColors.glassBorder, lineWidth: 1))
-                            }.buttonStyle(.plain)
-                        }
-                        VStack(alignment: .leading, spacing: 10) {
-                            Text("Notes (optional)").font(.system(size: 14, weight: .semibold, design: .rounded)).foregroundStyle(LColors.textSecondary)
-                            TextField("Any details...", text: $notes, axis: .vertical).lineLimit(3, reservesSpace: true)
-                                .font(.system(size: 15, design: .rounded)).foregroundStyle(LColors.textPrimary)
-                                .padding(14).background(LColors.glassSurface, in: RoundedRectangle(cornerRadius: LSpacing.cardRadius))
-                                .overlay(RoundedRectangle(cornerRadius: LSpacing.cardRadius).strokeBorder(LColors.glassBorder, lineWidth: 1))
-                        }
-                        Spacer(minLength: 32)
-                    }.padding(.horizontal).padding(.top, 16)
-                }.scrollDismissesKeyboard(.interactively)
+                    RoutineTaskFieldsForm(
+                        accent: AnyShapeStyle(LGradients.header),
+                        accentColor: LColors.gradientPurple,
+                        title: $taskName,
+                        notes: $notes,
+                        taskContext: $taskContext,
+                        selectedIcon: $selectedIcon,
+                        purpose: $purpose,
+                        motivation: $motivation,
+                        trigger: $trigger,
+                        triggerType: $triggerType,
+                        triggerReason: $triggerReason,
+                        environment: $environment,
+                        reward: $reward,
+                        consequence: $consequence,
+                        recoveryPlan: $recoveryPlan,
+                        hasDueTime: $hasDueTime,
+                        dueHour: $dueHour,
+                        dueMinute: $dueMinute,
+                        estimatedDuration: $estimatedDuration,
+                        repeatsOnDays: $repeatsOnDays,
+                        scheduledDays: $scheduledDays,
+                        notificationsEnabled: $notificationsEnabled,
+                        leadMinutes: $leadMinutes,
+                        alarmEnabled: $alarmEnabled,
+                        alarmSoundName: $alarmSoundName,
+                        steps: $steps,
+                        supplies: $supplies,
+                        obstacles: $obstacles
+                    )
+                    .padding(.horizontal, 20)
+                    .padding(.top, 16)
+                    .padding(.bottom, 40)
+                    .routinePageWidthLocked()
+                }
+                .routinePageScrollClipped()
+                .scrollDismissesKeyboard(.interactively)
             }
-            .navigationTitle(isEditing ? "Edit Task" : "Add Task").navigationBarTitleDisplayMode(.inline)
+            .navigationTitle(isEditing ? "Edit Task" : "Add Task")
+            .navigationBarTitleDisplayMode(.inline)
             .toolbarBackground(.hidden, for: .navigationBar)
             .toolbar {
                 ToolbarItem(placement: .keyboard) {
@@ -1285,14 +1509,51 @@ struct AddCustomRoutineTaskView: View {
                 }
                 ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() }.foregroundStyle(LColors.textPrimary) }
                 ToolbarItem(placement: .confirmationAction) {
-                    Button(isEditing ? "Save" : "Add") {
-                        let t = taskName.trimmingCharacters(in: .whitespacesAndNewlines); guard !t.isEmpty else { return }
-                        onAdd(t, notes.trimmingCharacters(in: .whitespacesAndNewlines), selectedIcon); dismiss()
-                    }.fontWeight(.semibold).foregroundStyle(LColors.textPrimary).disabled(!canAdd)
+                    Button(isEditing ? "Save" : "Add") { commit() }
+                        .fontWeight(.semibold).foregroundStyle(LColors.textPrimary).disabled(!canAdd)
                 }
             }
-            .sheet(isPresented: $showIconPicker) { LureliaIconPickerView(selectedIcon: $selectedIcon) }
         }
+    }
+
+    private func commit() {
+        let trimmedName = taskName.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmedName.isEmpty else { return }
+
+        var draft = baseDraft
+        draft.name = trimmedName
+        draft.icon = selectedIcon
+        draft.notes = notes.trimmingCharacters(in: .whitespacesAndNewlines)
+        draft.context = taskContext.trimmingCharacters(in: .whitespacesAndNewlines)
+
+        draft.purpose = purpose.trimmingCharacters(in: .whitespacesAndNewlines)
+        draft.motivation = motivation.trimmingCharacters(in: .whitespacesAndNewlines)
+        draft.trigger = trigger.trimmingCharacters(in: .whitespacesAndNewlines)
+        draft.triggerType = triggerType
+        draft.triggerReason = triggerReason.trimmingCharacters(in: .whitespacesAndNewlines)
+        draft.environment = environment.trimmingCharacters(in: .whitespacesAndNewlines)
+        draft.reward = reward.trimmingCharacters(in: .whitespacesAndNewlines)
+        draft.consequence = consequence.trimmingCharacters(in: .whitespacesAndNewlines)
+        draft.recoveryPlan = recoveryPlan.trimmingCharacters(in: .whitespacesAndNewlines)
+
+        draft.hasDueTime = hasDueTime
+        draft.dueHour = dueHour
+        draft.dueMinute = dueMinute
+        draft.estimatedDurationMinutes = max(0, estimatedDuration)
+        draft.repeatsOnDays = repeatsOnDays
+        draft.scheduledDays = scheduledDays.sorted()
+
+        draft.notificationsEnabled = notificationsEnabled && hasDueTime
+        draft.notificationLeadMinutes = leadMinutes.sorted()
+        draft.alarmEnabled = alarmEnabled && hasDueTime
+        draft.alarmSoundName = alarmSoundName
+
+        draft.steps = steps.filter { !$0.title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
+        draft.supplies = supplies.filter { !$0.name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
+        draft.obstacles = obstacles.filter { !$0.obstacle.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
+
+        onSave(draft)
+        dismiss()
     }
 }
 
@@ -1303,68 +1564,39 @@ struct LureliaRoutineTaskDraft: Identifiable {
     var name: String
     var icon: String = "sparkle"
     var notes: String = ""
+    var context: String = ""
     var isFromBank: Bool = false
     var bankTaskID: String? = nil
-}
 
-// MARK: - Icon Picker
+    // MARK: - Blueprint
+    var purpose: String = ""
+    var motivation: String = ""
+    var trigger: String = ""
+    var triggerType: LureliaCueType? = nil
+    var triggerReason: String = ""
+    var environment: String = ""
+    var reward: String = ""
+    var consequence: String = ""
+    var recoveryPlan: String = ""
 
-struct LureliaIconPickerView: View {
-    @Environment(\.dismiss) private var dismiss
-    @Binding var selectedIcon: String
-    @State private var searchText = ""
-    
-    private var filteredIcons: [LureliaIconItem] { LureliaIconLibrary.search(searchText) }
-    private var groupedIcons: [(category: String, icons: [LureliaIconItem])] {
-        Dictionary(grouping: filteredIcons) { $0.category }
-            .map { (category: $0.key, icons: $0.value.sorted { $0.name < $1.name }) }
-            .sorted { $0.category < $1.category }
-    }
-    
-    var body: some View {
-        NavigationStack {
-            ZStack {
-                LureliaBackgroundAlt()
-                ScrollView(showsIndicators: false) {
-                    VStack(spacing: 18) {
-                        HStack(spacing: 10) {
-                            Image(systemName: "magnifyingglass").font(.system(size: 14, weight: .semibold)).foregroundStyle(LColors.textSecondary.opacity(0.7))
-                            TextField("Search icons", text: $searchText).font(.system(size: 14, design: .rounded)).foregroundStyle(LColors.textPrimary)
-                        }
-                        .padding(.horizontal, 14).padding(.vertical, 12)
-                        .background(LColors.glassSurface, in: RoundedRectangle(cornerRadius: LSpacing.cardRadius))
-                        .overlay(RoundedRectangle(cornerRadius: LSpacing.cardRadius).strokeBorder(LColors.glassBorder, lineWidth: 1))
-                        
-                        ForEach(groupedIcons, id: \.category) { group in
-                            VStack(alignment: .leading, spacing: 10) {
-                                Text(group.category).font(.system(size: 13, weight: .bold, design: .rounded)).foregroundStyle(LColors.textSecondary)
-                                LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 10), count: 5), spacing: 10) {
-                                    ForEach(group.icons) { icon in
-                                        Button { selectedIcon = icon.name; dismiss() } label: {
-                                            LureliaIconView(iconId: icon.name, size: 24)
-                                                .foregroundStyle(selectedIcon == icon.name ? .white : LColors.textPrimary.opacity(0.75))
-                                                .frame(width: 52, height: 52)
-                                                .background(selectedIcon == icon.name ? AnyShapeStyle(LGradients.header) : AnyShapeStyle(LColors.glassSurface), in: RoundedRectangle(cornerRadius: 16))
-                                                .overlay(RoundedRectangle(cornerRadius: 16).strokeBorder(selectedIcon == icon.name ? LColors.glassBorderStrong : LColors.glassBorder, lineWidth: 1))
-                                        }.buttonStyle(.plain)
-                                    }
-                                }
-                            }
-                        }
-                    }.padding(.horizontal).padding(.vertical, 16)
-                }.scrollDismissesKeyboard(.interactively)
-            }
-            .navigationTitle("Choose Icon").navigationBarTitleDisplayMode(.inline)
-            .toolbarBackground(.hidden, for: .navigationBar)
-            .toolbar {
-                ToolbarItem(placement: .keyboard) {
-                    Button("Done") { UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil) }
-                        .frame(maxWidth: .infinity, alignment: .trailing)
-                }
-                ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() }.foregroundStyle(LColors.textPrimary) }
-            }
-        }
-    }
+    // MARK: - Schedule
+    var hasDueTime: Bool = false
+    var dueHour: Int = 8
+    var dueMinute: Int = 0
+    var estimatedDurationMinutes: Int = 0
+    var repeatsOnDays: Bool = false
+    var scheduledDays: [Int] = []
+
+    // MARK: - Notifications & Alarm
+    var notificationsEnabled: Bool = false
+    var notificationLeadMinutes: [Int] = []
+    var alarmEnabled: Bool = false
+    var alarmSoundName: String = LureliaReminderAlarmSound.defaultSound.fileName
+
+    // MARK: - Structured content
+    var steps: [StepDraft] = []
+    var supplies: [SupplyDraft] = []
+    var obstacles: [ObstacleDraft] = []
 }
 
 // MARK: - Time Picker

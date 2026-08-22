@@ -25,7 +25,10 @@
 //       "lurelia.habit.A1B2C3D4-....1"
 
 import Foundation
+import ActivityKit
+import AlarmKit
 import SwiftData
+import SwiftUI
 import UserNotifications
 import Combine
 import UIKit
@@ -119,6 +122,8 @@ final class HabitManager: ObservableObject {
             addRequest(id: id, content: content, trigger: trigger)
             print("⏰ [HabitManager] Scheduled '\(habit.title)' [\(timeStr)] → \(fireDate)")
         }
+
+        scheduleAlarmIfNeeded(for: habit)
     }
 
     // MARK: - Cancel
@@ -127,6 +132,7 @@ final class HabitManager: ObservableObject {
     func cancel(_ habit: LureliaHabit) {
         let ids = (0..<20).map { notificationID(for: habit, index: $0) }
         UNUserNotificationCenter.current().removePendingNotificationRequests(withIdentifiers: ids)
+        cancelAlarmIfNeeded(for: habit)
         print("🧹 [HabitManager] Cancelled notifications for '\(habit.title)'")
     }
 
@@ -167,6 +173,9 @@ final class HabitManager: ObservableObject {
 
                 let active = habits.filter { !$0.isArchived && !$0.timesOfDay.isEmpty }
                 print("🔁 [HabitManager] Rebuilding notifications for \(active.count) habits")
+                for habit in habits {
+                    cancelAlarmIfNeeded(for: habit)
+                }
                 for habit in active { schedule(habit) }
             } catch {
                 print("❌ [HabitManager] rescheduleAll fetch error: \(error)")
@@ -314,6 +323,127 @@ final class HabitManager: ObservableObject {
         }
         return (9, 0)
     }
+
+    // MARK: - AlarmKit
+
+    private func scheduleAlarmIfNeeded(for habit: LureliaHabit) {
+        guard habit.alarmEnabled, !habit.isArchived else { return }
+        let selectedTimes = uniqueTimes(habit.alarmFireTimes)
+        let activeAlarmTimes = selectedTimes.isEmpty
+            ? Array(uniqueTimes(habit.timesOfDay).prefix(1))
+            : selectedTimes
+
+        guard !activeAlarmTimes.isEmpty else { return }
+
+        for fireTime in activeAlarmTimes {
+            let (hour, minute) = parseHHMM(fireTime)
+            guard let alarmDate = nextDailyOccurrence(
+                hour: hour,
+                minute: minute,
+                daysOfWeek: habit.reminderDaysOfWeek
+            ) else {
+                print("⚠️ [HabitManager] Could not compute alarm date for '\(habit.title)' at \(fireTime)")
+                continue
+            }
+
+            let alarmID = habit.alarmUUID(forFireTime: fireTime)
+            scheduleAlarm(
+                habit: habit,
+                alarmID: alarmID,
+                alarmDate: alarmDate,
+                fireTime: fireTime
+            )
+        }
+    }
+
+    private func scheduleAlarm(
+        habit: LureliaHabit,
+        alarmID: UUID,
+        alarmDate: Date,
+        fireTime: String
+    ) {
+        Task { @MainActor in
+            guard #available(iOS 26.0, *) else { return }
+
+            do {
+                switch AlarmManager.shared.authorizationState {
+                case .authorized:
+                    break
+                case .notDetermined:
+                    let state = try await AlarmManager.shared.requestAuthorization()
+                    guard state == .authorized else {
+                        print("⚠️ [HabitManager] Alarm authorization was not granted for '\(habit.title)'")
+                        return
+                    }
+                case .denied:
+                    print("⚠️ [HabitManager] Alarm authorization denied for '\(habit.title)'")
+                    return
+                }
+
+                let alert = AlarmPresentation.Alert(
+                    title: LocalizedStringResource(stringLiteral: habit.title)
+                )
+                let metadata = LureliaHabitAlarmMetadata(
+                    habitID: habit.id,
+                    title: habit.title,
+                    icon: habit.iconName ?? "flame"
+                )
+                let attributes = AlarmAttributes(
+                    presentation: AlarmPresentation(alert: alert),
+                    metadata: metadata,
+                    tintColor: LColors.gradientBlue
+                )
+                let soundName = habit.alarmSoundName?.trimmingCharacters(in: .whitespacesAndNewlines)
+                let sound: AlertConfiguration.AlertSound = soundName?.isEmpty == false
+                    ? .named(soundName!)
+                    : .default
+                let configuration = AlarmManager.AlarmConfiguration.alarm(
+                    schedule: .fixed(alarmDate),
+                    attributes: attributes,
+                    sound: sound
+                )
+
+                try? AlarmManager.shared.cancel(id: alarmID)
+                try await AlarmManager.shared.schedule(id: alarmID, configuration: configuration)
+                print("✅ [HabitManager] Scheduled AlarmKit alarm")
+                print("   • Title: \(habit.title)")
+                print("   • Alarm ID: \(alarmID)")
+                print("   • Fire Date: \(alarmDate)")
+                print("   • Time Slot: \(fireTime)")
+                print("   • Sound: \(soundName ?? "default")")
+            } catch {
+                print("❌ [HabitManager] AlarmKit schedule error for '\(habit.title)': \(error)")
+            }
+        }
+    }
+
+    private func cancelAlarmIfNeeded(for habit: LureliaHabit) {
+        guard #available(iOS 26.0, *) else { return }
+
+        var alarmIDs = habit.alarmIdentifiers.map(\.id)
+        if let rawID = habit.alarmID,
+           let legacyAlarmID = UUID(uuidString: rawID) {
+            alarmIDs.append(legacyAlarmID)
+        }
+
+        for alarmID in Array(Set(alarmIDs)) {
+            do {
+                try AlarmManager.shared.cancel(id: alarmID)
+                print("🧹 [HabitManager] Cancelled AlarmKit alarm for '\(habit.title)'")
+                print("   • Alarm ID: \(alarmID)")
+            } catch {
+                print("⚠️ [HabitManager] AlarmKit cancel skipped for '\(habit.title)': \(error)")
+            }
+        }
+    }
+
+    private func uniqueTimes(_ times: [String]) -> [String] {
+        Array(
+            Set(times.map { $0.trimmingCharacters(in: .whitespacesAndNewlines) })
+        )
+        .filter { !$0.isEmpty }
+        .sorted()
+    }
 }
 
 // MARK: - LureliaHabit notification fields
@@ -374,6 +504,74 @@ extension LureliaHabit {
             reminderDaysOfWeekStorage = json
             updatedAt = Date()
         }
+    }
+
+    // MARK: - AlarmKit
+
+    var alarmFireTimes: [String] {
+        get {
+            guard let data = alarmFireTimesStorage.data(using: .utf8),
+                  let decoded = try? JSONDecoder().decode([String].self, from: data) else { return [] }
+            return decoded
+        }
+        set {
+            guard let data = try? JSONEncoder().encode(newValue),
+                  let json = String(data: data, encoding: .utf8) else {
+                alarmFireTimesStorage = "[]"
+                return
+            }
+            alarmFireTimesStorage = json
+            updatedAt = Date()
+        }
+    }
+
+    var alarmIdentifiers: [LureliaHabitAlarmIdentifier] {
+        get {
+            guard let data = alarmIDsStorage.data(using: .utf8),
+                  let decoded = try? JSONDecoder().decode([LureliaHabitAlarmIdentifier].self, from: data) else { return [] }
+            return decoded
+        }
+        set {
+            guard let data = try? JSONEncoder().encode(newValue),
+                  let json = String(data: data, encoding: .utf8) else {
+                alarmIDsStorage = "[]"
+                return
+            }
+            alarmIDsStorage = json
+            updatedAt = Date()
+        }
+    }
+
+    func alarmUUID(forFireTime fireTime: String) -> UUID {
+        let normalizedFireTime = fireTime.trimmingCharacters(in: .whitespacesAndNewlines)
+        if let existing = alarmIdentifiers.first(where: { $0.fireTime == normalizedFireTime }) {
+            return existing.id
+        }
+
+        let newIdentifier = LureliaHabitAlarmIdentifier(fireTime: normalizedFireTime)
+        alarmIdentifiers.append(newIdentifier)
+        return newIdentifier.id
+    }
+
+    func keepAlarmIdentifiers(for fireTimes: [String]) {
+        let selectedFireTimes = Set(fireTimes.map { $0.trimmingCharacters(in: .whitespacesAndNewlines) })
+        var identifiers = alarmIdentifiers
+
+        for fireTime in selectedFireTimes where !identifiers.contains(where: { $0.fireTime == fireTime }) {
+            identifiers.append(LureliaHabitAlarmIdentifier(fireTime: fireTime))
+        }
+
+        alarmIdentifiers = identifiers.sorted { $0.fireTime < $1.fireTime }
+    }
+}
+
+struct LureliaHabitAlarmIdentifier: Codable, Identifiable, Hashable {
+    var id: UUID
+    var fireTime: String
+
+    init(id: UUID = UUID(), fireTime: String) {
+        self.id = id
+        self.fireTime = fireTime
     }
 }
 

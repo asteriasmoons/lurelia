@@ -206,7 +206,7 @@ struct LureliaReminderHistoryView: View {
 
                 if dayHasEntries {
                     Circle()
-                        .fill(isSelected ? LColors.bg.opacity(0.85) : LColors.gradientPurple)
+                        .fill(isSelected ? LColors.bg.opacity(0.85) : Color.white.opacity(0.85))
                         .frame(width: 4, height: 4)
                         .offset(y: -3)
                 }
@@ -272,7 +272,7 @@ struct LureliaReminderHistoryView: View {
                     HStack(spacing: 6) {
                         Text(entry.occurrenceDate.formatted(date: .omitted, time: .shortened))
                             .font(.system(size: 13, weight: .semibold, design: .rounded))
-                            .foregroundStyle(LColors.gradientBlue)
+                            .foregroundStyle(Color.white.opacity(0.85))
 
                         Text(entry.occurrenceDate.formatted(date: .abbreviated, time: .omitted))
                             .font(.system(size: 11, weight: .medium, design: .rounded))

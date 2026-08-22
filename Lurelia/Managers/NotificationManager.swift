@@ -1,6 +1,7 @@
 //
 //  NotificationManager.swift
 //  Lurelia
+//  Desktop Commander connection test — hello from ChatGPT! ✨
 //
 //  Adapted from Lystaria's NotificationManager.
 //  Handles all local notification scheduling for LureliaReminder.
@@ -25,7 +26,10 @@
 //  Snooze uses suffix: baseID.snooze.<timestamp>
 
 import Foundation
+import ActivityKit
+import AlarmKit
 import SwiftData
+import SwiftUI
 import UserNotifications
 import Combine
 import UIKit
@@ -167,6 +171,8 @@ final class LureliaNotificationManager: ObservableObject {
             scheduleNextOccurrences(reminder: reminder, times: times, content: content, baseID: baseID)
         }
 
+        scheduleAlarmIfNeeded(for: reminder)
+
         dumpLureliaPendingNotifications(source: "after scheduleReminder for \(reminder.title)")
     }
 
@@ -189,6 +195,7 @@ final class LureliaNotificationManager: ObservableObject {
         for i in 0..<20 { ids.append("\(baseID).\(i)") }
         center.removePendingNotificationRequests(withIdentifiers: ids)
         center.removeDeliveredNotifications(withIdentifiers: ids)
+        cancelAlarmIfNeeded(for: reminder)
         print("🧹 Attempted removal IDs:")
         ids.forEach { print("   • \($0)") }
 
@@ -206,6 +213,150 @@ final class LureliaNotificationManager: ObservableObject {
 
         print("🧹 [Lurelia] Cancelled notifications for '\(reminder.title)'")
         dumpLureliaPendingNotifications(source: "after cancelReminder for \(reminder.title)")
+    }
+
+    // MARK: - AlarmKit
+
+    private func scheduleAlarmIfNeeded(for reminder: LureliaReminder) {
+        guard reminder.alarmEnabled else { return }
+        let selectedTimes = uniqueTimes(reminder.alarmFireTimes)
+        let activeAlarmTimes = selectedTimes.isEmpty
+            ? Array(resolvedTimesOfDay(for: reminder).prefix(1))
+            : selectedTimes
+
+        guard !activeAlarmTimes.isEmpty else { return }
+
+        for fireTime in activeAlarmTimes {
+            let (hour, minute) = parseTime(fireTime)
+            guard let alarmDate = alarmFireDate(
+                hour: hour,
+                minute: minute,
+                reminder: reminder
+            ) else {
+                print("⚠️ [Lurelia] Could not compute alarm date for '\(reminder.title)' at \(fireTime)")
+                continue
+            }
+
+            guard alarmDate > Date() else {
+                print("⏭ [Lurelia] Skipping past alarm for '\(reminder.title)' at \(fireTime)")
+                continue
+            }
+
+            let alarmID = reminder.alarmUUID(forFireTime: fireTime)
+            scheduleAlarm(
+                reminder: reminder,
+                alarmID: alarmID,
+                alarmDate: alarmDate,
+                fireTime: fireTime
+            )
+        }
+    }
+
+    private func scheduleAlarm(
+        reminder: LureliaReminder,
+        alarmID: UUID,
+        alarmDate: Date,
+        fireTime: String
+    ) {
+        Task { @MainActor in
+            guard #available(iOS 26.0, *) else { return }
+
+            do {
+                switch AlarmManager.shared.authorizationState {
+                case .authorized:
+                    break
+                case .notDetermined:
+                    let state = try await AlarmManager.shared.requestAuthorization()
+                    guard state == .authorized else {
+                        print("⚠️ [Lurelia] Alarm authorization was not granted for '\(reminder.title)'")
+                        return
+                    }
+                case .denied:
+                    print("⚠️ [Lurelia] Alarm authorization denied for '\(reminder.title)'")
+                    return
+                }
+
+                let alert = AlarmPresentation.Alert(
+                    title: LocalizedStringResource(stringLiteral: reminder.title)
+                )
+                let metadata = LureliaReminderAlarmMetadata(
+                    reminderID: reminder.id,
+                    notificationID: reminder.notificationID,
+                    title: reminder.title,
+                    icon: reminder.icon
+                )
+                let attributes = AlarmAttributes(
+                    presentation: AlarmPresentation(alert: alert),
+                    metadata: metadata,
+                    tintColor: LColors.gradientBlue
+                )
+                let soundName = reminder.alarmSoundName?.trimmingCharacters(in: .whitespacesAndNewlines)
+                let sound: AlertConfiguration.AlertSound = soundName?.isEmpty == false
+                    ? .named(soundName!)
+                    : .default
+                let configuration = AlarmManager.AlarmConfiguration.alarm(
+                    schedule: .fixed(alarmDate),
+                    attributes: attributes,
+                    sound: sound
+                )
+
+                try? AlarmManager.shared.cancel(id: alarmID)
+                try await AlarmManager.shared.schedule(id: alarmID, configuration: configuration)
+                print("✅ [Lurelia] Scheduled AlarmKit alarm")
+                print("   • Title: \(reminder.title)")
+                print("   • Alarm ID: \(alarmID)")
+                print("   • Fire Date: \(alarmDate)")
+                print("   • Time Slot: \(fireTime)")
+                print("   • Sound: \(soundName ?? "default")")
+            } catch {
+                print("❌ [Lurelia] AlarmKit schedule error for '\(reminder.title)': \(error)")
+            }
+        }
+    }
+
+    private func cancelAlarmIfNeeded(for reminder: LureliaReminder) {
+        guard #available(iOS 26.0, *) else { return }
+
+        var alarmIDs = reminder.alarmIdentifiers.map(\.id)
+        if let rawID = reminder.alarmID,
+           let legacyAlarmID = UUID(uuidString: rawID) {
+            alarmIDs.append(legacyAlarmID)
+        }
+
+        for alarmID in Array(Set(alarmIDs)) {
+            do {
+                try AlarmManager.shared.cancel(id: alarmID)
+                print("🧹 [Lurelia] Cancelled AlarmKit alarm for '\(reminder.title)'")
+                print("   • Alarm ID: \(alarmID)")
+            } catch {
+                print("⚠️ [Lurelia] AlarmKit cancel skipped for '\(reminder.title)': \(error)")
+            }
+        }
+    }
+
+    private func alarmFireDate(
+        hour: Int,
+        minute: Int,
+        reminder: LureliaReminder
+    ) -> Date? {
+        let calendar = Calendar.current
+
+        if reminder.repeatUnit == .none {
+            var components = calendar.dateComponents([.year, .month, .day], from: reminder.scheduledDate)
+            components.hour = hour
+            components.minute = minute
+            components.second = 0
+            return calendar.date(from: components)
+        }
+
+        let earliestAllowedFireDate = reminder.nextFireAt.map { max(Date(), $0) } ?? Date()
+        return nextOccurrence(
+            hour: hour,
+            minute: minute,
+            after: earliestAllowedFireDate.addingTimeInterval(-1),
+            reminder: reminder,
+            calendar: calendar
+        )
     }
 
     func cancelAllReminders() {

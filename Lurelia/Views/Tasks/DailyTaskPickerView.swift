@@ -179,7 +179,7 @@ struct DailyTaskPickerView: View {
                 HStack(spacing: 6) {
                     Image(systemName: "info.circle")
                         .font(.system(size: 11))
-                        .foregroundStyle(LColors.gradientPurple)
+                        .foregroundStyle(Color.white.opacity(0.85))
                     
                     Text("Pick at least one task from this category")
                         .font(.system(size: 12, design: .rounded))
@@ -190,7 +190,7 @@ struct DailyTaskPickerView: View {
                     if !currentCategorySelected.isEmpty {
                         Text("\(currentCategorySelected.count) selected")
                             .font(.system(size: 12, weight: .semibold, design: .rounded))
-                            .foregroundStyle(LColors.gradientPurple)
+                            .foregroundStyle(Color.white.opacity(0.85))
                     }
                 }
                 .padding(.horizontal, 24)
@@ -245,10 +245,10 @@ struct DailyTaskPickerView: View {
                                         
                                         Text(task.category)
                                             .font(.system(size: 10, weight: .semibold, design: .rounded))
-                                            .foregroundStyle(LColors.gradientBlue)
+                                            .foregroundStyle(Color.white.opacity(0.85))
                                             .padding(.horizontal, 7)
                                             .padding(.vertical, 3)
-                                            .background(LColors.gradientBlue.opacity(0.12))
+                                            .background(Color.white.opacity(0.85).opacity(0.12))
                                             .clipShape(Capsule())
                                     }
                                     
@@ -513,7 +513,7 @@ struct LureliaGradientButton: View {
         Button(action: action) {
             Text(title)
                 .font(.system(size: 16, weight: .black, design: .rounded))
-                .foregroundStyle(.white)
+                .foregroundStyle(Color.white.adaptivePrimaryText)
                 .frame(maxWidth: .infinity)
                 .frame(height: 58)
                 .background(
@@ -525,7 +525,7 @@ struct LureliaGradientButton: View {
                         .stroke(Color.white.opacity(0.12), lineWidth: 1)
                 )
                 .shadow(
-                    color: LColors.gradientPurple.opacity(0.25),
+                    color: Color.white.opacity(0.85).opacity(0.25),
                     radius: 18,
                     y: 10
                 )

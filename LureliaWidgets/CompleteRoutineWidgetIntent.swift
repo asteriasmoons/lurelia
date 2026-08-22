@@ -50,6 +50,8 @@ struct CompleteRoutineWidgetIntent: AppIntent {
 
         try context.save()
         WidgetCenter.shared.reloadTimelines(ofKind: "LureliaDueRoutinesWidget")
+        WidgetCenter.shared.reloadTimelines(ofKind: "LureliaKanbanTimelineWidget")
+        WidgetCenter.shared.reloadAllTimelines()
 
         return .result()
     }

@@ -10,107 +10,153 @@ import WidgetKit
 struct RoutinesView: View {
     @Environment(\.modelContext) private var modelContext
     @Environment(\.scenePhase) private var scenePhase
-    
+
     @Query(sort: \LureliaRoutine.sortOrder)
     private var routines: [LureliaRoutine]
-    
+
     @State private var showAdd = false
     @State private var activeRoutine: LureliaRoutine? = nil
     @State private var editRoutine: LureliaRoutine? = nil
-    @State private var refreshID = UUID()
-    
+    @State private var showTemplateLibrary = false
+    @State private var showContracts = false
+
+    /// Explicit navigation path shared by routine and task detail destinations.
+    @State private var navPath: [PersistentIdentifier] = []
+
     var body: some View {
-        NavigationStack {
+        NavigationStack(path: $navPath) {
             ZStack {
                 LureliaBackgroundAlt()
-                
-                ScrollView(showsIndicators: false) {
-                    VStack(spacing: 20) {
-                        
-                        // MARK: - Header
-                        
-                        HStack {
-                            VStack(alignment: .leading, spacing: 4) {
-                                Text("Routines")
-                                    .font(.system(size: 30, weight: .black, design: .rounded))
-                                    .foregroundStyle(.white)
-                                
-                                Text("Build flexible flows you can start, pause, and complete.")
-                                    .font(.system(size: 14, design: .rounded))
-                                    .foregroundStyle(.white.opacity(0.5))
+
+                GeometryReader { proxy in
+                    let gridSpacing: CGFloat = 12
+                    let gridWidth = max(0, proxy.size.width - 48)
+                    let cardWidth = max(0, (gridWidth - gridSpacing) / 2)
+                    let columns = [
+                        GridItem(.fixed(cardWidth), spacing: gridSpacing),
+                        GridItem(.fixed(cardWidth), spacing: 0)
+                    ]
+
+                    ScrollView(showsIndicators: false) {
+                        VStack(spacing: 20) {
+
+                            // MARK: - Header
+
+                            HStack {
+                                VStack(alignment: .leading, spacing: 4) {
+                                    Text("Routines")
+                                        .font(.system(size: 30, weight: .black, design: .rounded))
+                                        .foregroundStyle(.white)
+
+                                    Text("Build flexible flows you can start, pause, and complete.")
+                                        .font(.system(size: 14, design: .rounded))
+                                        .foregroundStyle(.white.opacity(0.5))
+                                }
+
+                                Spacer()
+
+                                Button {
+                                    showContracts = true
+                                } label: {
+                                    Image("stardoc")
+                                        .renderingMode(.template)
+                                        .resizable()
+                                        .scaledToFit()
+                                        .frame(width: 25, height: 25)
+                                        .foregroundStyle(.white)
+                                        .padding(.trailing, 6)
+                                }
+                                .buttonStyle(.plain)
+                                .accessibilityLabel("My Contracts")
+
+                                Button {
+                                    showTemplateLibrary = true
+                                } label: {
+                                    Image("cardlines")
+                                        .renderingMode(.template)
+                                        .resizable()
+                                        .scaledToFit()
+                                        .frame(width: 26, height: 26)
+                                        .foregroundStyle(.white)
+                                        .padding(.trailing, 6)
+                                }
+                                .buttonStyle(.plain)
+                                .accessibilityLabel("Task Templates")
+
+                                Button {
+                                    showAdd = true
+                                } label: {
+                                    Image("addwavy")
+                                        .renderingMode(.template)
+                                        .resizable()
+                                        .scaledToFit()
+                                        .frame(width: 30, height: 30)
+                                        .foregroundStyle(.white)
+                                }
+                                .buttonStyle(.plain)
                             }
-                            
-                            Spacer()
-                            
-                            Button {
-                                showAdd = true
-                            } label: {
-                                Image("addwavy")
-                                    .renderingMode(.template)
-                                    .resizable()
-                                    .scaledToFit()
-                                    .frame(width: 30, height: 30)
-                                    .foregroundStyle(.white)
-                            }
-                            .buttonStyle(.plain)
-                        }
-                        .padding(.horizontal, 24)
-                        .padding(.top, 20)
-                        
-                        LazyVStack(spacing: 14) {
+                            .padding(.horizontal, 24)
+                            .padding(.top, 20)
+
                             if routines.isEmpty {
                                 emptyState
                             } else {
-                                ForEach(routines) { routine in
-                                    NavigationLink(destination: RoutineDetailView(routineID: routine.id, refreshID: UUID())) {
-                                        RoutineCard(
-                                            routine: routine,
-                                            onRun: {
-                                                if let run = routine.activeRun, run.isPaused {
-                                                    RoutineManager.shared.resumeRun(
-                                                        run: run,
-                                                        routine: routine
-                                                    )
-                                                }
-                                                
-                                                activeRoutine = routine
-                                            },
-                                            onPause: {
-                                                if let run = routine.activeRun {
-                                                    RoutineManager.shared.pauseRun(
-                                                        run: run,
-                                                        routine: routine
-                                                    )
-                                                }
-                                            },
-                                            onStop: {
-                                                if let run = routine.activeRun {
-                                                    RoutineManager.shared.finishRun(
-                                                        run: run,
-                                                        routine: routine,
-                                                        wasCompleted: false
-                                                    )
-                                                }
-                                            },
-                                            onEdit: {
-                                                editRoutine = routine
+                                LazyVGrid(columns: columns, spacing: 14) {
+                                    ForEach(routines) { routine in
+                                        NavigationLink(value: routine.id) {
+                                            RoutineCard(
+                                                routine: routine,
+                                                onRun: {
+                                                    if let run = routine.activeRun, run.isPaused {
+                                                        RoutineManager.shared.resumeRun(
+                                                            run: run,
+                                                            routine: routine
+                                                        )
+                                                    }
+
+                                                    activeRoutine = routine
+                                                },
+                                                onPause: {
+                                                    if let run = routine.activeRun {
+                                                        RoutineManager.shared.pauseRun(
+                                                            run: run,
+                                                            routine: routine
+                                                        )
+                                                    }
+                                                },
+                                                onStop: {
+                                                    if let run = routine.activeRun {
+                                                        RoutineManager.shared.finishRun(
+                                                            run: run,
+                                                            routine: routine,
+                                                            wasCompleted: false
+                                                        )
+                                                    }
+                                                },
+                                                onEdit: {
+                                                    editRoutine = routine
+                                                },
+                                                fixedWidth: cardWidth
+                                            )
+                                        }
+                                        .buttonStyle(.plain)
+                                        .frame(width: cardWidth, height: RoutineCard.cardHeight)
+                                        .contextMenu {
+                                            Button(role: .destructive) {
+                                                deleteRoutine(routine)
+                                            } label: {
+                                                Label("Delete Routine", systemImage: "trash")
                                             }
-                                        )
-                                    }
-                                    .buttonStyle(.plain)
-                                    .contextMenu {
-                                        Button(role: .destructive) {
-                                            deleteRoutine(routine)
-                                        } label: {
-                                            Label("Delete Routine", systemImage: "trash")
                                         }
                                     }
                                 }
+                                .frame(width: gridWidth)
                             }
                         }
-                        .padding(.horizontal, 24)
+                        .padding(.bottom, 120)
+                        .frame(width: proxy.size.width, alignment: .top)
                     }
-                    .padding(.bottom, 120)
+                    .routinePageScrollClipped()
                 }
             }
             .sheet(isPresented: $showAdd) {
@@ -119,23 +165,42 @@ struct RoutinesView: View {
             .sheet(item: $editRoutine) { routine in
                 AddRoutineView(editingRoutine: routine)
             }
+            .sheet(isPresented: $showTemplateLibrary) {
+                RoutineTaskTemplateLibraryView()
+            }
+            .sheet(isPresented: $showContracts) {
+                RoutineContractsView()
+            }
             .fullScreenCover(item: $activeRoutine) { routine in
                 RoutineRunView(routine: routine)
             }
-            .id(refreshID)
+            .navigationDestination(for: PersistentIdentifier.self) { id in
+                if routines.contains(where: { $0.id == id }) {
+                    RoutineDetailView(routineID: id)
+                } else if let task = routines.flatMap({ $0.tasks ?? [] }).first(where: { $0.id == id }) {
+                    RoutineTaskDetailView(
+                        task: task,
+                        routineTint: task.routine.map { Color(lureliaHex: $0.colorHex) } ?? LColors.gradientPurple
+                    )
+                }
+            }
             .onChange(of: scenePhase) { newPhase in
                 if newPhase == .active {
-                    modelContext.rollback()
-                    refreshID = UUID()
+                    refreshOnForeground()
                 }
             }
             .onReceive(NotificationCenter.default.publisher(for: UIApplication.didBecomeActiveNotification)) { _ in
-                modelContext.rollback()
-                refreshID = UUID()
+                refreshOnForeground()
             }
         }
     }
-    
+
+    /// Let SwiftData process external mutations without rebuilding the
+    /// NavigationStack or resetting the scroll position.
+    private func refreshOnForeground() {
+        modelContext.processPendingChanges()
+    }
+
     private func deleteRoutine(_ routine: LureliaRoutine) {
         if activeRoutine?.persistentID == routine.persistentID {
             activeRoutine = nil
@@ -148,27 +213,27 @@ struct RoutinesView: View {
         modelContext.delete(routine)
         try? modelContext.save()
     }
-    
+
     private var emptyState: some View {
         VStack(spacing: 14) {
             Spacer(minLength: 80)
-            
-            Image("sparkle")
+
+            Image("qwill")
                 .renderingMode(.template)
                 .resizable()
                 .scaledToFit()
                 .frame(width: 56, height: 56)
                 .foregroundStyle(LGradients.header)
-            
+
             Text("No routines yet")
                 .font(.title3)
                 .fontWeight(.semibold)
                 .foregroundStyle(LColors.textSecondary)
-            
+
             Text("Tap + to build your first routine")
                 .font(.subheadline)
                 .foregroundStyle(LColors.textSecondary.opacity(0.7))
-            
+
             Spacer()
         }
         .frame(maxWidth: .infinity)

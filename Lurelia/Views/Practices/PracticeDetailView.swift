@@ -410,7 +410,10 @@ extension PracticeDetailView {
                                         if routine.allTasksDone {
                                             routine.resetTaskStates()
                                         } else {
-                                            routine.completeRoutine()
+                                            RoutineManager.shared.completeRoutine(
+                                                routine,
+                                                context: modelContext
+                                            )
                                         }
                                         try? modelContext.save()
                                     }

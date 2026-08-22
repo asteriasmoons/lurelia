@@ -17,8 +17,6 @@ struct ScheduleView: View {
     @Query(sort: \KanbanBoard.sortOrder) private var boards: [KanbanBoard]
 
     @State private var showCreateBoard = false
-    @State private var showTimeBlockView = false
-    @State private var showKanbanTimeline = false
     @State private var selectedBoardWrapper: KanbanBoardWrapper?
     @State private var editingBoard: KanbanBoard?
 
@@ -32,7 +30,7 @@ struct ScheduleView: View {
 
                         // MARK: Header
                         HStack {
-                            Text("Schedule")
+                            Text("Kanban")
                                 .font(.system(size: 30, weight: .black, design: .rounded))
                                 .foregroundStyle(.white)
 
@@ -55,18 +53,6 @@ struct ScheduleView: View {
 
                         CalendarView()
                             .padding(.bottom, 4)
-
-                        Button {
-                            showTimeBlockView = true
-                        } label: {
-                            ScheduleSquareActionCard(
-                                icon: "clockfill",
-                                title: "Time Block",
-                                subtitle: "Arrange today by time."
-                            )
-                        }
-                        .buttonStyle(.plain)
-                        .padding(.horizontal, 24)
 
                         if boards.isEmpty {
                             emptyState
@@ -106,9 +92,6 @@ struct ScheduleView: View {
             .sheet(isPresented: $showCreateBoard) {
                 CreateBoardView()
             }
-            .fullScreenCover(isPresented: $showTimeBlockView) {
-                TimeBlockView()
-            }
             .sheet(item: $editingBoard) { board in
                 CreateBoardView(board: board)
             }
@@ -142,13 +125,10 @@ struct ScheduleView: View {
             } label: {
                 Text("Create Board")
                     .font(.system(size: 15, weight: .black, design: .rounded))
-                    .foregroundStyle(.white)
+                    .foregroundStyle(LColors.textPrimary)
                     .frame(maxWidth: .infinity)
                     .frame(height: 54)
-                    .background(
-                        RoundedRectangle(cornerRadius: 20, style: .continuous)
-                            .fill(LGradients.header)
-                    )
+                    .background { LureliaNeutralGlassSurface(cornerRadius: 20) }
             }
             .buttonStyle(.plain)
             .padding(.top, 4)
@@ -263,18 +243,8 @@ struct ScheduleSquareActionCard: View {
         GlassCard {
             VStack(spacing: 12) {
                 ZStack {
-                    Circle()
-                        .fill(Color.white.opacity(0.10))
+                    LureliaNeutralGlassCircle()
                         .frame(width: 54, height: 54)
-
-                    Circle()
-                        .strokeBorder(LGradients.header, lineWidth: 1.6)
-                        .frame(width: 54, height: 54)
-
-                    Circle()
-                        .fill(Color.white.opacity(0.10))
-                        .frame(width: 38, height: 38)
-                        .blur(radius: 10)
 
                     Image(icon)
                         .renderingMode(.template)
@@ -363,9 +333,9 @@ struct CreateBoardView: View {
                             Image("xmarkwavy")
                                 .renderingMode(.template)
                                 .resizable()
-                                .scaledToFit()
-                                .frame(width: 28, height: 28)
-                                .foregroundStyle(LGradients.header)
+                            .scaledToFit()
+                            .frame(width: 28, height: 28)
+                                .foregroundStyle(LColors.textPrimary)
                         }
                     }
                     .padding(.horizontal, 24)
@@ -374,11 +344,12 @@ struct CreateBoardView: View {
                     HStack(spacing: 14) {
                         ZStack {
                             Circle()
-                                .fill(selectedColor.opacity(0.18))
+                                .fill(LColors.glassSurface2)
                                 .frame(width: 54, height: 54)
+                                .overlay(Circle().strokeBorder(LColors.glassBorder, lineWidth: 1))
 
                             LureliaIconView(iconId: selectedIcon, size: 30)
-                                .foregroundStyle(selectedColor)
+                                .foregroundStyle(LColors.neutralPearl.opacity(0.82))
                         }
 
                         Text(name.isEmpty ? "Board Name" : name)
@@ -391,18 +362,7 @@ struct CreateBoardView: View {
                     .background(LColors.glassSurface, in: RoundedRectangle(cornerRadius: 20))
                     .overlay(
                         RoundedRectangle(cornerRadius: 20)
-                            .strokeBorder(
-                                LinearGradient(
-                                    colors: [
-                                        LColors.gradientBlue.opacity(0.95),
-                                        LColors.gradientPurple.opacity(0.95),
-                                        Color.white.opacity(0.55)
-                                    ],
-                                    startPoint: .topLeading,
-                                    endPoint: .bottomTrailing
-                                ),
-                                lineWidth: 1.1
-                            )
+                            .strokeBorder(LColors.glassBorder, lineWidth: 1.1)
                     )
                     .padding(.horizontal, 24)
 
@@ -416,18 +376,7 @@ struct CreateBoardView: View {
                             .clipShape(RoundedRectangle(cornerRadius: 14))
                             .overlay(
                                 RoundedRectangle(cornerRadius: 14)
-                                    .strokeBorder(
-                                        LinearGradient(
-                                            colors: [
-                                                LColors.gradientBlue.opacity(0.90),
-                                                LColors.gradientPurple.opacity(0.90),
-                                                Color.white.opacity(0.35)
-                                            ],
-                                            startPoint: .topLeading,
-                                            endPoint: .bottomTrailing
-                                        ),
-                                        lineWidth: 1.1
-                                    )
+                                    .strokeBorder(LColors.glassBorder, lineWidth: 1.1)
                             )
                     }
 
@@ -438,7 +387,7 @@ struct CreateBoardView: View {
                         } label: {
                             HStack(spacing: 12) {
                                 LureliaIconView(iconId: selectedIcon, size: 28)
-                                    .foregroundStyle(LGradients.header)
+                                    .foregroundStyle(LColors.neutralPearl.opacity(0.82))
                                     .frame(width: 28, height: 28)
 
                                 Text(selectedIcon)
@@ -455,18 +404,7 @@ struct CreateBoardView: View {
                             .background(LColors.glassSurface2, in: RoundedRectangle(cornerRadius: 14))
                             .overlay(
                                 RoundedRectangle(cornerRadius: 14)
-                                    .strokeBorder(
-                                        LinearGradient(
-                                            colors: [
-                                                LColors.gradientBlue.opacity(0.90),
-                                                LColors.gradientPurple.opacity(0.90),
-                                                Color.white.opacity(0.35)
-                                            ],
-                                            startPoint: .topLeading,
-                                            endPoint: .bottomTrailing
-                                        ),
-                                        lineWidth: 1.1
-                                    )
+                                    .strokeBorder(LColors.glassBorder, lineWidth: 1.1)
                             )
                         }
                         .buttonStyle(.plain)
@@ -483,18 +421,7 @@ struct CreateBoardView: View {
                         .background(LColors.glassSurface2, in: RoundedRectangle(cornerRadius: 14))
                         .overlay(
                             RoundedRectangle(cornerRadius: 14)
-                                .strokeBorder(
-                                    LinearGradient(
-                                        colors: [
-                                            LColors.gradientBlue.opacity(0.90),
-                                            LColors.gradientPurple.opacity(0.90),
-                                            Color.white.opacity(0.35)
-                                        ],
-                                        startPoint: .topLeading,
-                                        endPoint: .bottomTrailing
-                                    ),
-                                    lineWidth: 1.1
-                                )
+                                .strokeBorder(LColors.glassBorder, lineWidth: 1.1)
                         )
                     }
 
@@ -513,13 +440,11 @@ struct CreateBoardView: View {
                             Text(isEditing ? "Save Changes" : "Create Board")
                                 .font(.system(size: 16, weight: .black, design: .rounded))
                         }
-                        .foregroundStyle(.white)
+                        .foregroundStyle(LColors.textPrimary)
                         .frame(maxWidth: .infinity)
                         .frame(height: 60)
-                        .background(
-                            RoundedRectangle(cornerRadius: 22).fill(LGradients.header)
-                        )
-                        .shadow(color: LColors.gradientPurple.opacity(0.25), radius: 18, y: 10)
+                        .background { LureliaNeutralGlassSurface(cornerRadius: 22) }
+                        .shadow(color: LColors.neutralPearl.opacity(0.10), radius: 18, y: 10)
                     }
                     .buttonStyle(.plain)
                     .disabled(!canSave)

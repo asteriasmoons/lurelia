@@ -363,7 +363,7 @@ extension JourneyDetailView {
                     .renderingMode(.template)
                     .resizable()
                     .scaledToFit()
-                    .foregroundStyle(.white)
+                    .foregroundStyle(LColors.bg)
                     .frame(width: 8, height: 8)
             }
         }
@@ -566,6 +566,16 @@ extension JourneyDetailView {
                             Circle()
                                 .fill(step.isCompleted ? AnyShapeStyle(LGradients.header) : AnyShapeStyle(Color.white.opacity(0.18)))
                                 .frame(width: 10, height: 10)
+                                .overlay {
+                                    if step.isCompleted {
+                                        Image("checkwavy")
+                                            .renderingMode(.template)
+                                            .resizable()
+                                            .scaledToFit()
+                                            .foregroundStyle(LColors.bg)
+                                            .frame(width: 6, height: 6)
+                                    }
+                                }
 
                             VStack(alignment: .leading, spacing: 2) {
                                 Text(step.title)

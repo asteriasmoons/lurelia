@@ -11,34 +11,37 @@ struct RoutineCard: View {
     let onPause: () -> Void
     let onStop: () -> Void
     let onEdit: () -> Void
-    
+    var fixedWidth: CGFloat? = nil
+
+    static let cardHeight: CGFloat = 164
+
     private var isActive: Bool {
         routine.activeRun != nil
     }
-    
+
     private var isPaused: Bool {
         routine.activeRun?.isPaused == true
     }
-    
+
     private var routineTint: Color {
         Color(lureliaHex: routine.colorHex)
     }
-    
+
     private var scheduleLabel: String {
         guard routine.scheduleEnabled && !routine.scheduledDays.isEmpty else {
             return "Unscheduled"
         }
-        
+
         let symbols = Calendar.current.shortWeekdaySymbols
-        
+
         let days = routine.scheduledDays
             .sorted()
             .compactMap { $0 >= 1 && $0 <= 7 ? symbols[$0 - 1] : nil }
             .joined(separator: ", ")
-        
+
         return "\(days)  \(routine.formattedTimeRange)"
     }
-    
+
     private var taskCount: Int {
         (routine.tasks ?? []).count
     }
@@ -66,7 +69,7 @@ struct RoutineCard: View {
             }
             .joined(separator: " ")
     }
-    
+
     private var taskPhaseText: String {
         let taskWord = taskCount == 1 ? "Task" : "Tasks"
         let phaseWord = phaseCount == 1 ? "Phase" : "Phases"
@@ -74,7 +77,7 @@ struct RoutineCard: View {
         return "\(taskCount) \(taskWord) • \(phaseCount) \(phaseWord)"
     }
 
-    private var weekdayDisplayText: String {
+    private var weekdayValuesForDisplay: [Int] {
         let days: [Int]
 
         if routine.phasesEnabled {
@@ -90,182 +93,58 @@ struct RoutineCard: View {
             days = routine.scheduleEnabled ? routine.scheduledDays.sorted() : []
         }
 
-        guard !days.isEmpty else {
-            return "No Schedule"
-        }
-        if Set(days) == Set(1...7) {
-            return "Daily"
-        }
-
-        let symbols = Calendar.current.shortWeekdaySymbols
-
         return days
-            .compactMap { weekday in
-                guard weekday >= 1 && weekday <= 7 else { return nil }
-                return String(symbols[weekday - 1].prefix(3))
-            }
-            .joined(separator: " • ")
+            .filter { (1...7).contains($0) }
+            .sorted()
     }
 
     private var timeDisplayText: String {
         "\(routine.formattedStartTime) – \(routine.formattedEndTime)"
     }
-    
-    var body: some View {
-        HStack(spacing: 16) {
-            ZStack {
-                Circle()
-                    .fill(routineTint.opacity(0.18))
-                    .frame(width: 58, height: 58)
-                    .overlay(
-                        Circle()
-                            .strokeBorder(LColors.glassBorderStrong, lineWidth: 1)
-                    )
-                
-                Circle()
-                    .fill(routineTint.opacity(0.22))
-                    .frame(width: 44, height: 44)
-                    .blur(radius: 12)
-                
-                LureliaIconView(iconId: routine.icon, size: 26)
-                    .foregroundStyle(LColors.textPrimary)
-            }
-            .frame(width: 58, height: 58)
-            
-            VStack(alignment: .leading, spacing: 5) {
-                Text(routine.name)
-                    .font(.system(size: 17, weight: .black, design: .rounded))
-                    .foregroundStyle(LColors.textPrimary)
-                    .lineLimit(1)
 
-                Text(taskPhaseText)
-                    .font(.system(size: 12, weight: .semibold, design: .rounded))
-                    .foregroundStyle(LColors.textSecondary.opacity(0.9))
-                    .lineLimit(1)
-
-                Text(weekdayDisplayText)
-                    .font(.system(size: 12, weight: .bold, design: .rounded))
-                    .foregroundStyle(routineTint)
-                    .lineLimit(1)
-
-                Text(timeDisplayText)
-                    .font(.system(size: 12, weight: .semibold, design: .rounded))
-                    .foregroundStyle(LColors.textSecondary.opacity(0.85))
-                    .lineLimit(1)
-
-                if isActive {
-                    Text(isPaused ? "Paused" : "In progress")
-                        .font(.system(size: 10, weight: .black, design: .rounded))
-                        .foregroundStyle(routineTint)
-                        .padding(.horizontal, 8)
-                        .padding(.vertical, 4)
-                        .background(routineTint.opacity(0.14), in: Capsule())
-                        .overlay(
-                            Capsule()
-                                .strokeBorder(routineTint.opacity(0.3), lineWidth: 1)
-                        )
-                }
-            }
-            
-            Spacer()
-            
-            HStack(spacing: 8) {
-                Button {
-                    onEdit()
-                } label: {
-                    Image("settings")
-                        .renderingMode(.template)
-                        .resizable()
-                        .scaledToFit()
-                        .frame(width: 16, height: 16)
-                        .foregroundStyle(LColors.textSecondary)
-                        .frame(width: 32, height: 32)
-                        .background(LColors.glassSurface, in: Circle())
-                        .overlay(
-                            Circle()
-                                .strokeBorder(LColors.glassBorder, lineWidth: 1)
-                        )
-                }
-                .buttonStyle(.plain)
-                
-                if isActive {
-                    if isPaused {
-                        Button {
-                            onRun()
-                        } label: {
-                            Image("playwavy")
-                                .renderingMode(.template)
-                                .resizable()
-                                .scaledToFit()
-                                .frame(width: 24, height: 24)
-                                .foregroundStyle(LColors.textPrimary)
-                                .frame(width: 38, height: 38)
-                                .background(routineTint.opacity(0.32), in: Circle())
-                                .overlay(
-                                    Circle()
-                                        .strokeBorder(routineTint.opacity(0.38), lineWidth: 1)
-                                )
-                        }
-                        .buttonStyle(.plain)
-                    } else {
-                        Button {
-                            onPause()
-                        } label: {
-                            Image("pausewavy")
-                                .renderingMode(.template)
-                                .resizable()
-                                .scaledToFit()
-                                .frame(width: 24, height: 24)
-                                .foregroundStyle(LColors.textPrimary)
-                                .frame(width: 38, height: 38)
-                                .background(routineTint.opacity(0.28), in: Circle())
-                                .overlay(
-                                    Circle()
-                                        .strokeBorder(routineTint.opacity(0.36), lineWidth: 1)
-                                )
-                        }
-                        .buttonStyle(.plain)
-                    }
-                    
-                    Button {
-                        onStop()
-                    } label: {
-                        Image("stopwavy")
-                            .renderingMode(.template)
-                            .resizable()
-                            .scaledToFit()
-                            .frame(width: 24, height: 24)
-                            .foregroundStyle(LColors.textPrimary)
-                            .frame(width: 38, height: 38)
-                            .background(LColors.glassSurface2, in: Circle())
-                            .overlay(
-                                Circle()
-                                    .strokeBorder(LColors.glassBorder, lineWidth: 1)
-                            )
-                    }
-                    .buttonStyle(.plain)
-                } else {
-                    Button {
-                        onRun()
-                    } label: {
-                        Image("playwavy")
-                            .renderingMode(.template)
-                            .resizable()
-                            .scaledToFit()
-                            .frame(width: 24, height: 24)
-                            .foregroundStyle(LColors.textPrimary)
-                            .frame(width: 38, height: 38)
-                            .background(routineTint.opacity(0.32), in: Circle())
-                            .overlay(
-                                Circle()
-                                    .strokeBorder(routineTint.opacity(0.38), lineWidth: 1)
-                            )
-                    }
-                    .buttonStyle(.plain)
-                }
-            }
+    private var centeredTaskPhaseText: String {
+        if isActive {
+            return "\(taskPhaseText) • \(isPaused ? "Paused" : "In progress")"
         }
-        .padding(16)
+
+        return taskPhaseText
+    }
+
+    var body: some View {
+        VStack(spacing: 1) {
+            routineIconBadge
+
+            Text(routine.name)
+                .font(.system(size: 16, weight: .black, design: .rounded))
+                .foregroundStyle(LColors.textPrimary)
+                .lineLimit(1)
+                .minimumScaleFactor(0.75)
+                .multilineTextAlignment(.center)
+                .frame(maxWidth: .infinity)
+
+            Text(centeredTaskPhaseText)
+                .font(.system(size: 10, weight: .semibold, design: .rounded))
+                .foregroundStyle(LColors.textSecondary.opacity(0.9))
+                .lineLimit(1)
+                .multilineTextAlignment(.center)
+
+            scheduledDaysRow
+
+            Text(timeDisplayText)
+                .font(.system(size: 10, weight: .semibold, design: .rounded))
+                .foregroundStyle(LColors.textSecondary.opacity(0.85))
+                .lineLimit(1)
+                .multilineTextAlignment(.center)
+
+            Color.clear
+                .frame(height: 2)
+                .allowsHitTesting(false)
+
+            bottomControlRow
+        }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 12)
+        .frame(width: fixedWidth, height: Self.cardHeight, alignment: .center)
         .background {
             RoundedRectangle(cornerRadius: 22, style: .continuous)
                 .fill(LColors.glassSurface)
@@ -289,8 +168,163 @@ struct RoutineCard: View {
                         )
                 }
         }
+        .clipShape(RoundedRectangle(cornerRadius: 22, style: .continuous))
         .shadow(color: routineTint.opacity(0.13), radius: 14, x: 0, y: 7)
     }
+
+    private var routineIconBadge: some View {
+        ZStack {
+            Circle()
+                .fill(routineTint.opacity(0.18))
+                .frame(width: 36.5, height: 36.5)
+                .overlay(
+                    Circle()
+                        .strokeBorder(LColors.glassBorderStrong, lineWidth: 1)
+                )
+
+            Circle()
+                .fill(routineTint.opacity(0.22))
+                .frame(width: 30.5, height: 30.5)
+                .blur(radius: 7)
+
+            LureliaIconView(iconId: routine.icon, size: 30)
+                .foregroundStyle(LColors.textPrimary)
+        }
+        .frame(width: 36.5, height: 36.5)
+    }
+
+    private var bottomControlRow: some View {
+        HStack(spacing: 4) {
+            if isActive {
+                activeRunButton
+            } else {
+                inactiveRunButton
+            }
+
+            settingsButton
+        }
+        .frame(maxWidth: .infinity, alignment: .center)
+        .layoutPriority(1)
+    }
+
+    @ViewBuilder
+    private var activeRunButton: some View {
+        if isPaused {
+            Button {
+                onRun()
+            } label: {
+                routineControlIcon(
+                    named: "playwavy",
+                    iconSize: 17,
+                    buttonSize: 26,
+                    foreground: LColors.textPrimary,
+                    background: routineTint.opacity(0.32),
+                    border: routineTint.opacity(0.38)
+                )
+            }
+            .buttonStyle(.plain)
+        } else {
+            Button {
+                onPause()
+            } label: {
+                routineControlIcon(
+                    named: "pausewavy",
+                    iconSize: 17,
+                    buttonSize: 26,
+                    foreground: LColors.textPrimary,
+                    background: routineTint.opacity(0.28),
+                    border: routineTint.opacity(0.36)
+                )
+            }
+            .buttonStyle(.plain)
+        }
+    }
+
+    private var inactiveRunButton: some View {
+        Button {
+            onRun()
+        } label: {
+            routineControlIcon(
+                named: "playwavy",
+                iconSize: 17,
+                buttonSize: 26,
+                foreground: LColors.textPrimary,
+                background: routineTint.opacity(0.32),
+                border: routineTint.opacity(0.38)
+            )
+        }
+        .buttonStyle(.plain)
+    }
+
+    private var settingsButton: some View {
+        Button {
+            onEdit()
+        } label: {
+            routineControlIcon(
+                named: "settings",
+                iconSize: 14,
+                buttonSize: 26,
+                foreground: LColors.textSecondary,
+                background: LColors.glassSurface,
+                border: LColors.glassBorder
+            )
+        }
+        .buttonStyle(.plain)
+    }
+
+    private func routineControlIcon(
+        named imageName: String,
+        iconSize: CGFloat,
+        buttonSize: CGFloat,
+        foreground: Color,
+        background: Color,
+        border: Color
+    ) -> some View {
+        Image(imageName)
+            .renderingMode(.template)
+            .resizable()
+            .scaledToFit()
+            .frame(width: iconSize, height: iconSize)
+            .foregroundStyle(foreground)
+            .frame(width: buttonSize, height: buttonSize)
+            .background(background, in: Circle())
+            .overlay {
+                Circle()
+                    .strokeBorder(border, lineWidth: 1)
+            }
+    }
+
+    @ViewBuilder
+    private var scheduledDaysRow: some View {
+        let days = weekdayValuesForDisplay
+
+        if days.isEmpty {
+            Text("No Schedule")
+                .font(.system(size: 10, weight: .bold, design: .rounded))
+                .foregroundStyle(LColors.textSecondary.opacity(0.85))
+                .lineLimit(1)
+        } else {
+            HStack(spacing: 4) {
+                ForEach(days, id: \.self) { weekday in
+                    Text(shortWeekdayLabel(for: weekday))
+                        .font(.system(size: 7, weight: .black, design: .rounded))
+                        .foregroundStyle(routineTint)
+                        .frame(width: 16, height: 16)
+                        .background(routineTint.opacity(0.14), in: Circle())
+                        .overlay {
+                            Circle()
+                                .strokeBorder(routineTint.opacity(0.65), lineWidth: 1)
+                        }
+                }
+            }
+        }
+    }
+
+    private func shortWeekdayLabel(for weekday: Int) -> String {
+        guard weekday >= 1 && weekday <= 7 else { return "--" }
+        return Calendar.current.veryShortWeekdaySymbols[weekday - 1]
+    }
+
     private func routineInfoPill(title: String, subtitle: String) -> some View {
         VStack(spacing: 1) {
             Text(title)

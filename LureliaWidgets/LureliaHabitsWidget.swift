@@ -20,6 +20,9 @@ struct LureliaWidgetHabitItem: Identifiable, Hashable {
     let status: LureliaWidgetHabitStatus
     let streak: Int
     let firedCount: Int
+    /// User-selected habit color hex (falls back to the app default
+    /// `#7d19f7` for legacy habits with no color set).
+    let colorHex: String
 }
 
 enum LureliaWidgetHabitStatus: String, Hashable {
@@ -40,7 +43,7 @@ struct LureliaHabitsEntry: TimelineEntry {
 
 // MARK: - Timeline Provider
 
-struct LureliaHabitsProvider: TimelineProvider {
+struct LureliaHabitsProvider: AppIntentTimelineProvider {
     func placeholder(in context: Context) -> LureliaHabitsEntry {
         LureliaHabitsEntry(
             date: Date(),
@@ -53,7 +56,8 @@ struct LureliaHabitsProvider: TimelineProvider {
                     target: 1,
                     status: .done,
                     streak: 12,
-                    firedCount: 1
+                    firedCount: 1,
+                    colorHex: "#7d19f7"
                 ),
                 LureliaWidgetHabitItem(
                     id: UUID(),
@@ -63,32 +67,31 @@ struct LureliaHabitsProvider: TimelineProvider {
                     target: 1,
                     status: .soon,
                     streak: 5,
-                    firedCount: 0
+                    firedCount: 0,
+                    colorHex: "#03dbfc"
                 )
             ],
             debugInfo: "placeholder"
         )
     }
 
-    func getSnapshot(
-        in context: Context,
-        completion: @escaping (LureliaHabitsEntry) -> Void
-    ) {
+    func snapshot(
+        for configuration: LureliaContentWidgetConfigurationIntent,
+        in context: Context
+    ) async -> LureliaHabitsEntry {
         let now = Date()
         let result = fetchWidgetHabits(now: now)
-        completion(
-            LureliaHabitsEntry(
-                date: now,
-                habits: result.items,
-                debugInfo: result.debugInfo
-            )
+        return LureliaHabitsEntry(
+            date: now,
+            habits: result.items,
+            debugInfo: result.debugInfo
         )
     }
 
-    func getTimeline(
-        in context: Context,
-        completion: @escaping (Timeline<LureliaHabitsEntry>) -> Void
-    ) {
+    func timeline(
+        for configuration: LureliaContentWidgetConfigurationIntent,
+        in context: Context
+    ) async -> Timeline<LureliaHabitsEntry> {
         let now = Date()
         let calendar = Calendar.current
         let tomorrow = calendar.startOfDay(
@@ -114,11 +117,9 @@ struct LureliaHabitsProvider: TimelineProvider {
             )
         }
 
-        completion(
-            Timeline(
-                entries: entries,
-                policy: .after(tomorrow)
-            )
+        return Timeline(
+            entries: entries,
+            policy: .after(tomorrow)
         )
     }
 
@@ -165,6 +166,8 @@ struct LureliaHabitsProvider: TimelineProvider {
             )
 
             let allHabits = try context.fetch(descriptor)
+            let allLogs = try context.fetch(FetchDescriptor<LureliaHabitLog>())
+            let allSkips = try context.fetch(FetchDescriptor<LureliaHabitSkip>())
             let calendar = Calendar.current
 
             // Filter: active (not archived) and scheduled for today
@@ -173,21 +176,27 @@ struct LureliaHabitsProvider: TimelineProvider {
             }
 
             let todayStart = calendar.startOfDay(for: now)
+            let todayLogsByHabitID = logsByHabitID(
+                from: allLogs,
+                todayStart: todayStart,
+                calendar: calendar
+            )
+            let skippedHabitIDs = skippedHabitIDs(
+                from: allSkips,
+                todayStart: todayStart,
+                calendar: calendar
+            )
 
             let items: [LureliaWidgetHabitItem] = todaysHabits.compactMap { habit in
-                let todaysLog = (habit.logs ?? []).first { log in
-                    calendar.isDate(log.dayStart, inSameDayAs: todayStart)
-                }
-                let todaysSkip = (habit.skips ?? []).first { skip in
-                    calendar.isDate(skip.dayStart, inSameDayAs: todayStart)
-                }
-
-                let count = todaysLog?.count ?? 0
                 let target = habit.target
+                let count = effectiveCompletionCount(
+                    for: todayLogsByHabitID[habit.id] ?? [],
+                    target: target
+                )
                 let fired = firedCountToday(habit, now: now, calendar: calendar)
 
                 let status: LureliaWidgetHabitStatus
-                if todaysSkip != nil && count == 0 {
+                if skippedHabitIDs.contains(habit.id) && count == 0 {
                     status = .skipped
                 } else if count >= target {
                     status = .done
@@ -202,6 +211,8 @@ struct LureliaHabitsProvider: TimelineProvider {
                     status = .soon
                 }
 
+                let hex = habit.colorHex.trimmingCharacters(in: .whitespacesAndNewlines)
+
                 return LureliaWidgetHabitItem(
                     id: habit.id,
                     title: habit.title,
@@ -210,7 +221,8 @@ struct LureliaHabitsProvider: TimelineProvider {
                     target: target,
                     status: status,
                     streak: habit.dailyStreak,
-                    firedCount: 0
+                    firedCount: 0,
+                    colorHex: hex.isEmpty ? "#7d19f7" : hex
                 )
             }
             .sorted { a, b in
@@ -229,6 +241,40 @@ struct LureliaHabitsProvider: TimelineProvider {
         } catch {
             return ([], "SwiftData error: \(error.localizedDescription)")
         }
+    }
+
+    private func logsByHabitID(
+        from logs: [LureliaHabitLog],
+        todayStart: Date,
+        calendar: Calendar
+    ) -> [UUID: [LureliaHabitLog]] {
+        var result: [UUID: [LureliaHabitLog]] = [:]
+
+        for log in logs where calendar.isDate(log.dayStart, inSameDayAs: todayStart) {
+            guard let habitID = log.habit?.id else { continue }
+            result[habitID, default: []].append(log)
+        }
+
+        return result
+    }
+
+    private func skippedHabitIDs(
+        from skips: [LureliaHabitSkip],
+        todayStart: Date,
+        calendar: Calendar
+    ) -> Set<UUID> {
+        Set(
+            skips.compactMap { skip in
+                guard calendar.isDate(skip.dayStart, inSameDayAs: todayStart) else { return nil }
+                return skip.habit?.id
+            }
+        )
+    }
+
+    private func effectiveCompletionCount(for logs: [LureliaHabitLog], target: Int) -> Int {
+        let storedCount = logs.map(\.count).max() ?? 0
+        let fireTimeCount = Set(logs.flatMap { $0.completedFireTimes }).count
+        return min(target, max(storedCount, fireTimeCount))
     }
 
     private func habitHasFiredToday(_ habit: LureliaHabit, now: Date, calendar: Calendar) -> Bool {
@@ -324,10 +370,12 @@ struct LureliaHabitsWidgetView: View {
     }
 
     private func habitRow(_ habit: LureliaWidgetHabitItem) -> some View {
-        HStack(spacing: 9) {
+        let tint = Color(widgetHex: habit.colorHex)
+
+        return HStack(spacing: 9) {
             // Complete button
             if habit.status == .done {
-                completedCircle
+                completedCircle(tint: tint)
             } else if habit.status == .skipped {
                 skippedCircle
             } else {
@@ -336,13 +384,13 @@ struct LureliaHabitsWidgetView: View {
                         habitID: habit.id.uuidString
                     )
                 ) {
-                    progressCircle(habit: habit)
+                    progressCircle(habit: habit, tint: tint)
                         .contentShape(Circle())
                 }
                 .buttonStyle(.plain)
             }
 
-            widgetIcon(habit.icon, size: 22)
+            widgetIcon(habit.icon, tint: tint, size: 22)
 
             VStack(alignment: .leading, spacing: 2) {
                 Text(habit.title)
@@ -353,7 +401,7 @@ struct LureliaHabitsWidgetView: View {
                 HStack(spacing: 5) {
                     Text(statusLabel(for: habit))
                         .font(.system(size: 10, weight: .black, design: .rounded))
-                        .foregroundStyle(statusColor(for: habit.status))
+                        .foregroundStyle(statusColor(for: habit.status, tint: tint))
                 }
             }
 
@@ -377,27 +425,17 @@ struct LureliaHabitsWidgetView: View {
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(
             RoundedRectangle(cornerRadius: 14, style: .continuous)
-                .fill(.white.opacity(0.09))
+                .fill(tint.opacity(0.18))
         )
         .overlay(
             RoundedRectangle(cornerRadius: 14, style: .continuous)
-                .strokeBorder(
-                    LinearGradient(
-                        colors: [
-                            Color(lureliaHex: "#03dbfc").opacity(0.55),
-                            Color(lureliaHex: "#7d19f7").opacity(0.55)
-                        ],
-                        startPoint: .topLeading,
-                        endPoint: .bottomTrailing
-                    ),
-                    lineWidth: 1
-                )
+                .strokeBorder(tint.opacity(0.55), lineWidth: 1)
         )
     }
 
     // MARK: - Circle States
 
-    private func progressCircle(habit: LureliaWidgetHabitItem) -> some View {
+    private func progressCircle(habit: LureliaWidgetHabitItem, tint: Color) -> some View {
         let size: CGFloat = 28
         let dotCount = 16
         let dotRadius: CGFloat = 1.5
@@ -414,60 +452,31 @@ struct LureliaHabitsWidgetView: View {
                 let y = sin(angle) * Double(ringRadius)
 
                 Circle()
-                    .fill(.white.opacity(0.18))
+                    .fill(tint.opacity(0.28))
                     .frame(width: dotRadius * 2, height: dotRadius * 2)
                     .offset(x: x, y: y)
             }
 
-            // Progress dots (gradient colored)
-            if habit.count > 0 && habit.target > 1 {
-                ForEach(0..<filledDots, id: \.self) { i in
-                    let angle = (2 * .pi / Double(dotCount)) * Double(i) - .pi / 2
-                    let x = cos(angle) * Double(ringRadius)
-                    let y = sin(angle) * Double(ringRadius)
-                    let t = Double(i) / Double(max(dotCount - 1, 1))
-                    let color = gradientColor(at: t)
+            // Progress dots (tinted with habit color)
+            let visibleFilled = habit.target > 1 && habit.count > 0 ? filledDots : dotCount
+            ForEach(0..<visibleFilled, id: \.self) { i in
+                let angle = (2 * .pi / Double(dotCount)) * Double(i) - .pi / 2
+                let x = cos(angle) * Double(ringRadius)
+                let y = sin(angle) * Double(ringRadius)
 
-                    Circle()
-                        .fill(color)
-                        .frame(width: dotRadius * 2, height: dotRadius * 2)
-                        .offset(x: x, y: y)
-                }
-            } else {
-                // All dots gradient (no progress yet)
-                ForEach(0..<dotCount, id: \.self) { i in
-                    let angle = (2 * .pi / Double(dotCount)) * Double(i) - .pi / 2
-                    let x = cos(angle) * Double(ringRadius)
-                    let y = sin(angle) * Double(ringRadius)
-                    let t = Double(i) / Double(max(dotCount - 1, 1))
-                    let color = gradientColor(at: t)
-
-                    Circle()
-                        .fill(color)
-                        .frame(width: dotRadius * 2, height: dotRadius * 2)
-                        .offset(x: x, y: y)
-                }
+                Circle()
+                    .fill(tint)
+                    .frame(width: dotRadius * 2, height: dotRadius * 2)
+                    .offset(x: x, y: y)
             }
         }
         .frame(width: size, height: size)
     }
 
-    private func gradientColor(at t: Double) -> Color {
-        // #03dbfc (cyan) -> #7d19f7 (purple)
-        let r = 0.012 + (0.490 - 0.012) * t
-        let g = 0.859 + (0.098 - 0.859) * t
-        let b = 0.988 + (0.969 - 0.988) * t
-        return Color(red: r, green: g, blue: b)
-    }
-
-    private func lerp(_ a: Double, _ b: Double, _ t: Double) -> Double {
-        a + (b - a) * t
-    }
-
-    private var completedCircle: some View {
+    private func completedCircle(tint: Color) -> some View {
         ZStack {
             Circle()
-                .fill(widgetGradient)
+                .fill(tint)
                 .frame(width: 28, height: 28)
 
             if let uiImage = LureliaWidgetShared.widgetIcon(for: "checkwavy") {
@@ -525,32 +534,13 @@ struct LureliaHabitsWidgetView: View {
         }
     }
 
-    private func statusColor(for status: LureliaWidgetHabitStatus) -> Color {
+    private func statusColor(for status: LureliaWidgetHabitStatus, tint: Color) -> Color {
         switch status {
-        case .dueNow:
-            return Color(lureliaHex: "#c7a3ff")
-        case .soon:
-            return Color(lureliaHex: "#7eedff")
-        case .partial:
-            return Color(lureliaHex: "#7eedff")
-        case .done:
-            return Color(lureliaHex: "#e2ed8a")
+        case .dueNow, .soon, .partial, .done:
+            return tint
         case .skipped:
             return .white.opacity(0.45)
         }
-    }
-
-    // MARK: - Shared Styling
-
-    private var widgetGradient: LinearGradient {
-        LinearGradient(
-            colors: [
-                Color(lureliaHex: "#03dbfc"),
-                Color(lureliaHex: "#7d19f7")
-            ],
-            startPoint: .topLeading,
-            endPoint: .bottomTrailing
-        )
     }
 
     @ViewBuilder
@@ -572,12 +562,16 @@ struct LureliaHabitsWidgetView: View {
     }
 
     @ViewBuilder
-    private func widgetIcon(_ name: String, size: CGFloat) -> some View {
+    private func widgetIcon(
+        _ name: String,
+        tint: Color = .white,
+        size: CGFloat
+    ) -> some View {
         let trimmedName = name.trimmingCharacters(in: .whitespacesAndNewlines)
         let iconName = trimmedName.isEmpty ? "repeatfill" : trimmedName
 
         if let uiImage = LureliaWidgetShared.widgetIcon(for: iconName) {
-            widgetGradient
+            tint
                 .mask(
                     Image(uiImage: uiImage)
                         .renderingMode(.template)
@@ -586,7 +580,7 @@ struct LureliaHabitsWidgetView: View {
                 )
                 .frame(width: size, height: size)
         } else if let fallbackImage = LureliaWidgetShared.widgetIcon(for: "repeatfill") {
-            widgetGradient
+            tint
                 .mask(
                     Image(uiImage: fallbackImage)
                         .renderingMode(.template)
@@ -595,12 +589,10 @@ struct LureliaHabitsWidgetView: View {
                 )
                 .frame(width: size, height: size)
         } else {
-            widgetGradient
-                .mask(
-                    Image(systemName: "repeat")
-                        .resizable()
-                        .scaledToFit()
-                )
+            Image(systemName: "repeat")
+                .resizable()
+                .scaledToFit()
+                .foregroundStyle(tint)
                 .frame(width: size, height: size)
         }
     }
@@ -612,8 +604,9 @@ struct LureliaHabitsWidget: Widget {
     let kind = "LureliaHabitsWidget"
 
     var body: some WidgetConfiguration {
-        StaticConfiguration(
+        AppIntentConfiguration(
             kind: kind,
+            intent: LureliaContentWidgetConfigurationIntent.self,
             provider: LureliaHabitsProvider()
         ) { entry in
             LureliaHabitsWidgetView(entry: entry)

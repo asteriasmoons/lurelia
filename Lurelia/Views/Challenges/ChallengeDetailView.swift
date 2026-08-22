@@ -487,7 +487,7 @@ struct ChallengeDetailView: View {
                     } label: {
                         Text("Submit")
                             .font(.system(size: 11, weight: .black, design: .rounded))
-                            .foregroundStyle(.white)
+                            .foregroundStyle(Color.white.adaptivePrimaryText)
                             .padding(.horizontal, 12)
                             .padding(.vertical, 7)
                             .background(LGradients.header, in: Capsule())

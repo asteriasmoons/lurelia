@@ -1,0 +1,95 @@
+//
+//  CompleteRoutineTaskWidgetIntent.swift
+//  Lurelia
+//
+//  Task-level completion intent used by LureliaDueRoutinesWidget's task
+//  tiles. Marks one `LureliaRoutineTask` completed by its `stableTaskID`
+//  and, if that finished off the parent routine, marks the routine itself.
+//
+
+import Foundation
+import AppIntents
+import WidgetKit
+import SwiftData
+
+struct CompleteRoutineTaskWidgetIntent: AppIntent {
+    static var title: LocalizedStringResource = "Complete Routine Task"
+    static var description = IntentDescription(
+        "Completes a single routine task from the widget."
+    )
+
+    /// The task's `stableTaskID`. We use this rather than the routine ID so
+    /// the intent can operate on the exact tile the user tapped without
+    /// needing to disambiguate multiple pending tasks inside the routine.
+    @Parameter(title: "Task ID")
+    var taskID: String
+
+    init(taskID: String) {
+        self.taskID = taskID
+    }
+
+    init() {
+        self.taskID = ""
+    }
+
+    func perform() async throws -> some IntentResult {
+        print("🟣 [WidgetIntent] CompleteRoutineTask perform — taskID=\(taskID)")
+        guard !taskID.isEmpty else {
+            print("🟣 [WidgetIntent] CompleteRoutineTask — empty taskID, bailing")
+            return .result()
+        }
+
+        print("🟣 [WidgetIntent] CompleteRoutineTask — opening container")
+        let container = try LureliaWidgetShared.makeIntentModelContainer()
+        print("🟣 [WidgetIntent] CompleteRoutineTask — container OK, creating context")
+        let context = ModelContext(container)
+        print("🟣 [WidgetIntent] CompleteRoutineTask — context OK, fetching task")
+
+        // Fetch the exact task by its stable ID. `stableTaskID` is unique
+        // across the app's routine tasks.
+        let descriptor = FetchDescriptor<LureliaRoutineTask>(
+            predicate: #Predicate<LureliaRoutineTask> { task in
+                task.stableTaskID == taskID
+            }
+        )
+
+        guard let task = try context.fetch(descriptor).first else {
+            print("🟣 [WidgetIntent] CompleteRoutineTask — task not found for id=\(taskID)")
+            return .result()
+        }
+        print("🟣 [WidgetIntent] CompleteRoutineTask — task found: \(task.title), isPending=\(task.isPending)")
+
+        // Idempotent: if the task was already completed or skipped, we're
+        // done — just refresh the widget so the tile disappears next tick.
+        guard task.isPending else {
+            print("🟣 [WidgetIntent] CompleteRoutineTask — not pending, just reloading widget")
+            WidgetCenter.shared.reloadTimelines(ofKind: "LureliaDueRoutinesWidget")
+            return .result()
+        }
+
+        print("🟣 [WidgetIntent] CompleteRoutineTask — calling markCompleted")
+        task.markCompleted()
+
+        // If completing this task finished off the routine, mark the routine
+        // itself completed so the routines list / live activity stay in sync.
+        if let routine = task.routine {
+            print("🟣 [WidgetIntent] CompleteRoutineTask — updating parent routine")
+            routine.updatedAt = Date()
+            if routine.allTasksDone {
+                routine.lastCompletedAt = Date()
+            }
+        }
+
+        print("🟣 [WidgetIntent] CompleteRoutineTask — saving context")
+        try context.save()
+        print("🟣 [WidgetIntent] CompleteRoutineTask — save OK, reloading widgets")
+
+        // Refresh every widget that surfaces routine progress.
+        WidgetCenter.shared.reloadTimelines(ofKind: "LureliaDueRoutinesWidget")
+        WidgetCenter.shared.reloadTimelines(ofKind: "LureliaHabitsWidget")
+        WidgetCenter.shared.reloadTimelines(ofKind: "LureliaKanbanTimelineWidget")
+        print("🟣 [WidgetIntent] CompleteRoutineTask — done, returning")
+
+        return .result()
+    }
+}

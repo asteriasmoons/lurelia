@@ -15,6 +15,9 @@ struct LureliaWidgetReminderItem: Identifiable, Hashable {
     let icon: String
     let fireDate: Date
     let status: LureliaWidgetReminderStatus
+    /// User-selected reminder color hex (fallback `#7d19f7` for legacy
+    /// reminders with no color set).
+    let colorHex: String
 }
 
 enum LureliaWidgetReminderStatus: String, Hashable {
@@ -38,14 +41,16 @@ struct LureliaDueRemindersProvider: TimelineProvider {
                     title: "Medicine PM",
                     icon: "pillfill",
                     fireDate: Date(),
-                    status: .dueNow
+                    status: .dueNow,
+                    colorHex: "#7d19f7"
                 ),
                 LureliaWidgetReminderItem(
                     id: UUID(),
                     title: "Journal",
                     icon: "journalfill",
                     fireDate: Date().addingTimeInterval(20 * 60),
-                    status: .soon
+                    status: .soon,
+                    colorHex: "#03dbfc"
                 )
             ],
             debugInfo: "placeholder"
@@ -96,7 +101,8 @@ struct LureliaDueRemindersProvider: TimelineProvider {
                     title: item.title,
                     icon: item.icon,
                     fireDate: item.fireDate,
-                    status: item.fireDate <= transitionDate ? .dueNow : .soon
+                    status: item.fireDate <= transitionDate ? .dueNow : .soon,
+                    colorHex: item.colorHex
                 )
             }
             entries.append(
@@ -172,16 +178,26 @@ struct LureliaDueRemindersProvider: TimelineProvider {
         now: Date
     ) -> LureliaWidgetReminderItem? {
         let fireDate = displayFireDate(for: reminder, now: now)
-        let soonLimit = now.addingTimeInterval(24 * 60 * 60)
 
-        guard fireDate <= soonLimit else { return nil }
+        // No hard cutoff — surface every enabled, non-completed reminder
+        // sorted by fire date so upcoming (even weeks-out) reminders like a
+        // birthday still show up on the widget instead of being filtered
+        // out as "not due soon".
+        let hex = reminder.colorHex.trimmingCharacters(in: .whitespacesAndNewlines)
+
+        // Anything within the next 24 hours or already past due reads as
+        // "Due Now"; further out reads as "Soon".
+        let soonThreshold = now.addingTimeInterval(24 * 60 * 60)
+        let status: LureliaWidgetReminderStatus =
+            fireDate <= soonThreshold ? .dueNow : .soon
 
         return LureliaWidgetReminderItem(
             id: reminder.id,
             title: reminder.title,
             icon: reminder.icon.isEmpty ? "bellfill" : reminder.icon,
             fireDate: fireDate,
-            status: fireDate <= now ? .dueNow : .soon
+            status: fireDate <= now ? .dueNow : status,
+            colorHex: hex.isEmpty ? "#7d19f7" : hex
         )
     }
 
@@ -345,22 +361,17 @@ struct LureliaDueRemindersWidgetView: View {
     }
 
     private var emptyState: some View {
-        VStack(alignment: .leading, spacing: 5) {
-            Text("Nothing due soon")
-                .font(.system(size: 14, weight: .bold, design: .rounded))
-                .foregroundStyle(.white)
-
-            Text(entry.debugInfo)
-                .font(.system(size: 9, weight: .medium, design: .monospaced))
-                .foregroundStyle(.white.opacity(0.62))
-                .lineLimit(3)
-        }
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(.top, 10)
+        Text("Nothing due soon")
+            .font(.system(size: 14, weight: .bold, design: .rounded))
+            .foregroundStyle(.white.opacity(0.6))
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.top, 10)
     }
 
     private func reminderRow(_ reminder: LureliaWidgetReminderItem) -> some View {
-        HStack(spacing: 9) {
+        let tint = Color(widgetHex: reminder.colorHex)
+
+        return HStack(spacing: 9) {
             Button(
                 intent: CompleteReminderWidgetIntent(
                     reminderID: reminder.id.uuidString
@@ -372,14 +383,14 @@ struct LureliaDueRemindersWidgetView: View {
                         .frame(width: 22, height: 22)
 
                     Circle()
-                        .strokeBorder(widgetGradient, lineWidth: 2)
+                        .strokeBorder(tint, lineWidth: 2)
                         .frame(width: 22, height: 22)
                 }
                 .contentShape(Circle())
             }
             .buttonStyle(.plain)
 
-            widgetIcon(reminder.icon, size: 18)
+            widgetIcon(reminder.icon, tint: tint, size: 18)
 
             VStack(alignment: .leading, spacing: 2) {
                 Text(reminder.title)
@@ -390,7 +401,7 @@ struct LureliaDueRemindersWidgetView: View {
                 HStack(spacing: 5) {
                     Text(reminder.status.rawValue)
                         .font(.system(size: 9, weight: .black, design: .rounded))
-                        .foregroundStyle(statusColor(for: reminder.status))
+                        .foregroundStyle(tint)
 
                     Text(reminder.fireDate.formatted(date: .omitted, time: .shortened))
                         .font(.system(size: 9, weight: .semibold, design: .rounded))
@@ -415,42 +426,12 @@ struct LureliaDueRemindersWidgetView: View {
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(
             RoundedRectangle(cornerRadius: 14, style: .continuous)
-                .fill(.white.opacity(0.09))
+                .fill(tint.opacity(0.18))
         )
         .overlay(
             RoundedRectangle(cornerRadius: 14, style: .continuous)
-                .strokeBorder(
-                    LinearGradient(
-                        colors: [
-                            Color(lureliaHex: "#03dbfc").opacity(0.55),
-                            Color(lureliaHex: "#7d19f7").opacity(0.55)
-                        ],
-                        startPoint: .topLeading,
-                        endPoint: .bottomTrailing
-                    ),
-                    lineWidth: 1
-                )
+                .strokeBorder(tint.opacity(0.55), lineWidth: 1)
         )
-    }
-
-    private var widgetGradient: LinearGradient {
-        LinearGradient(
-            colors: [
-                Color(lureliaHex: "#03dbfc"),
-                Color(lureliaHex: "#7d19f7")
-            ],
-            startPoint: .topLeading,
-            endPoint: .bottomTrailing
-        )
-    }
-
-    private func statusColor(for status: LureliaWidgetReminderStatus) -> Color {
-        switch status {
-        case .dueNow:
-            return Color(lureliaHex: "#c7a3ff")
-        case .soon:
-            return Color(lureliaHex: "#7eedff")
-        }
     }
 
     @ViewBuilder
@@ -461,23 +442,27 @@ struct LureliaDueRemindersWidgetView: View {
                 .resizable()
                 .scaledToFit()
                 .frame(width: size, height: size)
-                .foregroundStyle(.white.opacity(0.35))
+                .foregroundStyle(.white.opacity(0.55))
         } else {
             Image(systemName: "forward.fill")
                 .resizable()
                 .scaledToFit()
                 .frame(width: size, height: size)
-                .foregroundStyle(.white.opacity(0.35))
+                .foregroundStyle(.white.opacity(0.55))
         }
     }
 
     @ViewBuilder
-    private func widgetIcon(_ name: String, size: CGFloat) -> some View {
+    private func widgetIcon(
+        _ name: String,
+        tint: Color = .white,
+        size: CGFloat
+    ) -> some View {
         let trimmedName = name.trimmingCharacters(in: .whitespacesAndNewlines)
         let iconName = trimmedName.isEmpty ? "bellfill" : trimmedName
 
         if let uiImage = LureliaWidgetShared.widgetIcon(for: iconName) {
-            widgetGradient
+            tint
                 .mask(
                     Image(uiImage: uiImage)
                         .renderingMode(.template)
@@ -486,7 +471,7 @@ struct LureliaDueRemindersWidgetView: View {
                 )
                 .frame(width: size, height: size)
         } else if let fallbackImage = LureliaWidgetShared.widgetIcon(for: "bellfill") {
-            widgetGradient
+            tint
                 .mask(
                     Image(uiImage: fallbackImage)
                         .renderingMode(.template)
@@ -495,12 +480,10 @@ struct LureliaDueRemindersWidgetView: View {
                 )
                 .frame(width: size, height: size)
         } else {
-            widgetGradient
-                .mask(
-                    Image(systemName: "bell.fill")
-                        .resizable()
-                        .scaledToFit()
-                )
+            Image(systemName: "bell.fill")
+                .resizable()
+                .scaledToFit()
+                .foregroundStyle(tint)
                 .frame(width: size, height: size)
         }
     }

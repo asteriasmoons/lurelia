@@ -23,6 +23,13 @@ struct HabitBlueprintFormSection: View {
     @Binding var levels: [LureliaHabitLevel]
     @Binding var immediateReward: String
     @Binding var longTermReward: String
+    /// Optional accent tint. `nil` uses the neutral glass sheet style.
+    var tint: Color? = nil
+
+    private var accentStyle: AnyShapeStyle {
+        if let tint { return AnyShapeStyle(tint) }
+        return AnyShapeStyle(LColors.neutralPearl.opacity(0.82))
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 20) {
@@ -32,7 +39,7 @@ struct HabitBlueprintFormSection: View {
             // MARK: - Identity
 
             subsectionLabel("IDENTITY")
-            GlassCard {
+            GlassCard(tint: tint) {
                 VStack(alignment: .leading, spacing: 10) {
                     Text("Who am I becoming?")
                         .font(.system(size: 12, weight: .semibold, design: .rounded))
@@ -47,7 +54,7 @@ struct HabitBlueprintFormSection: View {
             // MARK: - Purpose
 
             subsectionLabel("PURPOSE")
-            GlassCard {
+            GlassCard(tint: tint) {
                 VStack(alignment: .leading, spacing: 10) {
                     Text("Why does this habit exist?")
                         .font(.system(size: 12, weight: .semibold, design: .rounded))
@@ -62,7 +69,7 @@ struct HabitBlueprintFormSection: View {
             // MARK: - Implementation Intention
 
             subsectionLabel("IMPLEMENTATION INTENTION")
-            GlassCard {
+            GlassCard(tint: tint) {
                 VStack(alignment: .leading, spacing: 10) {
                     Text("Write a clear when/where plan for this habit.")
                         .font(.system(size: 12, weight: .semibold, design: .rounded))
@@ -78,7 +85,7 @@ struct HabitBlueprintFormSection: View {
 
             subsectionLabel("CUE")
 
-            GlassCard {
+            GlassCard(tint: tint) {
                 VStack(alignment: .leading, spacing: 14) {
                     Text("Cue Type")
                         .font(.system(size: 13, weight: .semibold, design: .rounded))
@@ -88,7 +95,7 @@ struct HabitBlueprintFormSection: View {
                 }
             }
 
-            GlassCard {
+            GlassCard(tint: tint) {
                 VStack(alignment: .leading, spacing: 10) {
                     Text("What reminds you to begin this habit?")
                         .font(.system(size: 12, weight: .semibold, design: .rounded))
@@ -100,7 +107,7 @@ struct HabitBlueprintFormSection: View {
                 }
             }
 
-            GlassCard {
+            GlassCard(tint: tint) {
                 VStack(alignment: .leading, spacing: 10) {
                     Text("Why This Cue Works")
                         .font(.system(size: 13, weight: .semibold, design: .rounded))
@@ -116,7 +123,7 @@ struct HabitBlueprintFormSection: View {
 
             subsectionLabel("ENVIRONMENT")
 
-            GlassCard {
+            GlassCard(tint: tint) {
                 VStack(alignment: .leading, spacing: 14) {
                     VStack(alignment: .leading, spacing: 8) {
                         Text("Current Environment")
@@ -158,7 +165,7 @@ struct HabitBlueprintFormSection: View {
 
             subsectionLabel("TEMPTATION BUNDLING")
 
-            GlassCard {
+            GlassCard(tint: tint) {
                 VStack(alignment: .leading, spacing: 14) {
                     VStack(alignment: .leading, spacing: 8) {
                         Text("Need")
@@ -199,7 +206,7 @@ struct HabitBlueprintFormSection: View {
             // MARK: - Rules
 
             subsectionLabel("HABIT RULES")
-            GlassCard {
+            GlassCard(tint: tint) {
                 VStack(alignment: .leading, spacing: 12) {
                     ForEach(Array(habitRules.enumerated()), id: \.offset) { index, _ in
                         HStack(alignment: .top, spacing: 10) {
@@ -236,7 +243,7 @@ struct HabitBlueprintFormSection: View {
                                 .resizable()
                                 .scaledToFit()
                                 .frame(width: 16, height: 16)
-                                .foregroundStyle(LGradients.header)
+                                .foregroundStyle(accentStyle)
                             Text("Add Rule")
                                 .font(.system(size: 13, weight: .semibold, design: .rounded))
                                 .foregroundStyle(.white.opacity(0.6))
@@ -249,7 +256,7 @@ struct HabitBlueprintFormSection: View {
             // MARK: - Obstacles & Solutions
 
             subsectionLabel("OBSTACLES & SOLUTIONS")
-            GlassCard {
+            GlassCard(tint: tint) {
                 VStack(alignment: .leading, spacing: 14) {
                     ForEach(Array(habitObstacles.enumerated()), id: \.offset) { index, _ in
                         VStack(alignment: .leading, spacing: 8) {
@@ -319,7 +326,7 @@ struct HabitBlueprintFormSection: View {
                                 .resizable()
                                 .scaledToFit()
                                 .frame(width: 16, height: 16)
-                                .foregroundStyle(LGradients.header)
+                                .foregroundStyle(accentStyle)
                             Text("Add Obstacle")
                                 .font(.system(size: 13, weight: .semibold, design: .rounded))
                                 .foregroundStyle(.white.opacity(0.6))
@@ -333,7 +340,7 @@ struct HabitBlueprintFormSection: View {
 
             subsectionLabel("HABIT LEVELS")
 
-            GlassCard {
+            GlassCard(tint: tint) {
                 VStack(alignment: .leading, spacing: 12) {
 
                     ForEach(Array(levels.enumerated()), id: \.offset) { index, _ in
@@ -345,7 +352,7 @@ struct HabitBlueprintFormSection: View {
                                 .resizable()
                                 .scaledToFit()
                                 .frame(width: 22, height: 22)
-                                .foregroundStyle(LGradients.header)
+                                .foregroundStyle(accentStyle)
 
                             TextField(
                                 "Level \(index + 1)",
@@ -395,7 +402,7 @@ struct HabitBlueprintFormSection: View {
                                 .resizable()
                                 .scaledToFit()
                                 .frame(width: 16, height: 16)
-                                .foregroundStyle(LGradients.header)
+                                .foregroundStyle(accentStyle)
 
                             Text("Add Level")
                                 .font(.system(size: 13, weight: .semibold, design: .rounded))
@@ -410,7 +417,7 @@ struct HabitBlueprintFormSection: View {
             // MARK: - Rewards
 
             subsectionLabel("REWARDS")
-            GlassCard {
+            GlassCard(tint: tint) {
                 VStack(alignment: .leading, spacing: 14) {
                     VStack(alignment: .leading, spacing: 8) {
                         Text("Immediate Reward")
@@ -470,7 +477,7 @@ struct HabitBlueprintFormSection: View {
                     .padding(.vertical, 10)
                     .background(
                         isSelected
-                        ? AnyShapeStyle(LGradients.header)
+                        ? accentStyle
                         : AnyShapeStyle(Color.white.opacity(0.06))
                     )
                     .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
@@ -496,7 +503,7 @@ struct HabitBlueprintFormSection: View {
                 .resizable()
                 .scaledToFit()
                 .frame(width: 20, height: 20)
-                .foregroundStyle(LGradients.header)
+                .foregroundStyle(accentStyle)
 
             Text(text)
                 .font(.system(size: 12, weight: .semibold, design: .rounded))
@@ -559,7 +566,7 @@ struct HabitBlueprintFormSection: View {
     private func ruleNumberCircle(_ number: Int) -> some View {
         ZStack {
             Circle()
-                .strokeBorder(LGradients.header, lineWidth: 1.5)
+                .strokeBorder(accentStyle, lineWidth: 1.5)
                 .frame(width: 26, height: 26)
 
             Text("\(number)")
