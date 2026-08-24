@@ -10,6 +10,7 @@ import PhotosUI
 
 struct ProfileView: View {
     @Environment(\.modelContext) private var modelContext
+    @Environment(\.horizontalSizeClass) private var horizontalSizeClass
     
     @Query private var settings: [UserSettings]
     @Query(sort: \KanbanBoard.sortOrder) private var boards: [KanbanBoard]
@@ -20,6 +21,7 @@ struct ProfileView: View {
     @State private var showPhotoPicker = false
     @State private var showOnboardingResetConfirmation = false
     @State private var showTimelineBoardDropdown = false
+    @State private var showingReleaseNotes = false
     @State private var isUploadingProfileImage = false
     @State private var profileImageUploadError: String?
     @State private var hasAttemptedProfileImageUpload = false
@@ -52,6 +54,9 @@ struct ProfileView: View {
                     // MARK: - Profile Card
                     
                     profileCard
+                        .padding(.horizontal, 24)
+
+                    releaseNotesCard
                         .padding(.horizontal, 24)
 
                     timelineSettingsCard
@@ -99,6 +104,11 @@ struct ProfileView: View {
         }
         .task {
             await uploadExistingProfileAvatarIfNeeded()
+        }
+        .adaptivePresentation(isPresented: $showingReleaseNotes, useFullScreenCover: horizontalSizeClass == .regular) {
+            ReleaseNotesPage()
+                .presentationDetents([.large])
+                .presentationDragIndicator(.hidden)
         }
     }
 
@@ -605,6 +615,46 @@ struct ProfileView: View {
         }
     }
 
+    private var releaseNotesCard: some View {
+        Button {
+            showingReleaseNotes = true
+        } label: {
+            GlassCard {
+                HStack(alignment: .center, spacing: 14) {
+                    Image("timebook")
+                        .renderingMode(.template)
+                        .resizable()
+                        .scaledToFit()
+                        .frame(width: 20, height: 20)
+                        .foregroundStyle(LColors.textPrimary)
+                        .frame(width: 42, height: 42)
+                        .background { LureliaNeutralGlassCircle(prominence: .active) }
+
+                    VStack(alignment: .leading, spacing: 5) {
+                        Text("Release Notes")
+                            .font(.system(size: 16, weight: .black, design: .rounded))
+                            .foregroundStyle(LColors.textPrimary)
+
+                        Text("See what changed across the latest Lurelia updates.")
+                            .font(.system(size: 12, weight: .semibold, design: .rounded))
+                            .foregroundStyle(LColors.textSecondary)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+
+                    Spacer(minLength: 0)
+
+                    Image("chevright")
+                        .renderingMode(.template)
+                        .resizable()
+                        .scaledToFit()
+                        .frame(width: 15, height: 15)
+                        .foregroundStyle(LColors.textPrimary)
+                }
+            }
+        }
+        .buttonStyle(.plain)
+    }
+
     private var defaultTimelineBoard: KanbanBoard? {
         guard let boardID = userSettings?.defaultTimelineBoardID else {
             return boards.first
@@ -787,6 +837,21 @@ struct ProfileView: View {
             }
         }
         .frame(width: size, height: size)
+    }
+}
+
+private extension View {
+    @ViewBuilder
+    func adaptivePresentation<Content: View>(
+        isPresented: Binding<Bool>,
+        useFullScreenCover: Bool,
+        @ViewBuilder content: @escaping () -> Content
+    ) -> some View {
+        if useFullScreenCover {
+            self.fullScreenCover(isPresented: isPresented, content: content)
+        } else {
+            self.sheet(isPresented: isPresented, content: content)
+        }
     }
 }
 

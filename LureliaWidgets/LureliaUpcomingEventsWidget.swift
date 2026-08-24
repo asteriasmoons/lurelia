@@ -129,7 +129,7 @@ struct LureliaUpcomingEventsProvider: AppIntentTimelineProvider {
             let mirroredRecurringAppleIDs = Set(
                 allEvents
                     .filter { $0.recurrence != nil }
-                    .compactMap { $0.appleEventIdentifier?.trimmingCharacters(in: .whitespacesAndNewlines) }
+                    .compactMap(\.resolvedAppleSeriesIdentifier)
                     .filter { !$0.isEmpty }
             )
 
@@ -185,18 +185,18 @@ struct LureliaUpcomingEventsProvider: AppIntentTimelineProvider {
                     // calendar color, not a blend of every membership.
                     _ = event.additionalCalendarIDs.compactMap { calendarByID[$0] }
 
-                    items.append(
-                        LureliaWidgetEventItem(
-                            id: "\(event.id.uuidString)-\(Int(occ.start.timeIntervalSince1970))",
-                            title: event.title.trimmingCharacters(in: .whitespacesAndNewlines),
-                            icon: event.displayIcon,
-                            start: occ.start,
-                            end: occ.end,
-                            isAllDay: occ.isAllDay,
-                            colorHex: hex,
-                            calendarName: calendarName
-                        )
+                    let item = LureliaWidgetEventItem(
+                        id: "\(event.id.uuidString)-\(Int(occ.start.timeIntervalSince1970))",
+                        title: event.title.trimmingCharacters(in: .whitespacesAndNewlines),
+                        icon: event.displayIcon,
+                        start: occ.start,
+                        end: occ.end,
+                        isAllDay: occ.isAllDay,
+                        colorHex: hex,
+                        calendarName: calendarName
                     )
+                    debugWidgetLocalEventItem(event: event, occurrence: occ, primary: primary, item: item)
+                    items.append(item)
                 }
             }
 
@@ -205,7 +205,7 @@ struct LureliaUpcomingEventsProvider: AppIntentTimelineProvider {
                     .trimmingCharacters(in: .whitespacesAndNewlines)
                     .nonEmptyOrNilForWidget
                     ?? LureliaEvent.appleShadowKey(
-                        appleEventIdentifier: snapshot.appleEventIdentifier,
+                        appleEventIdentifier: snapshot.appleSeriesIdentifier ?? snapshot.appleEventIdentifier,
                         occurrenceStart: snapshot.start,
                         occurrenceEnd: snapshot.end,
                         isRecurring: false
@@ -214,7 +214,7 @@ struct LureliaUpcomingEventsProvider: AppIntentTimelineProvider {
                       snapshot.start < interval.end,
                       snapshot.end > interval.start,
                       !importedAppleOccurrenceKeys.contains(snapshotOccurrenceKey),
-                      !mirroredRecurringAppleIDs.contains(snapshot.appleEventIdentifier)
+                      !mirroredRecurringAppleIDs.contains(snapshot.appleSeriesIdentifier ?? snapshot.appleEventIdentifier)
                 else {
                     continue
                 }
@@ -233,22 +233,29 @@ struct LureliaUpcomingEventsProvider: AppIntentTimelineProvider {
                     }
                 }
 
-                items.append(
-                    LureliaWidgetEventItem(
-                        id: "apple-\(snapshot.id)",
-                        title: snapshot.title,
-                        icon: "starcal",
-                        start: snapshot.start,
-                        end: snapshot.end,
-                        isAllDay: snapshot.isAllDay,
-                        colorHex: snapshot.colorHex,
-                        calendarName: snapshot.calendarTitle
-                    )
+                let snapshotIcon = snapshot.icon?
+                    .trimmingCharacters(in: .whitespacesAndNewlines)
+                    .nonEmptyOrNilForWidget
+                    ?? widgetSeriesIcon(for: snapshot, events: allEvents)
+                    ?? "starcal"
+
+                let item = LureliaWidgetEventItem(
+                    id: "apple-\(snapshot.id)",
+                    title: snapshot.title,
+                    icon: snapshotIcon,
+                    start: snapshot.start,
+                    end: snapshot.end,
+                    isAllDay: snapshot.isAllDay,
+                    colorHex: snapshot.colorHex,
+                    calendarName: snapshot.calendarTitle
                 )
+                debugWidgetExternalSnapshotItem(snapshot: snapshot, item: item)
+                items.append(item)
             }
 
             // Chronological, cap at what the widget can show.
             let sorted = items.sorted { $0.start < $1.start }
+            debugWidgetFinalItems(sorted)
 
             return LureliaUpcomingEventsEntry(date: Date(), events: sorted)
         } catch {
@@ -287,14 +294,201 @@ private func eventWidgetColorHex(
        let appleColor = event.appleCalendarColor?
         .trimmingCharacters(in: .whitespacesAndNewlines)
         .nonEmptyOrNilForWidget {
+        debugWidgetColorResolution(
+            event: event,
+            primary: primary,
+            occurrence: occurrence,
+            resolvedColor: appleColor,
+            reason: "appleImportedShadow.appleCalendarColor"
+        )
         return appleColor
     }
 
-    return primaryColor
+    let resolvedColor = primaryColor
     ?? occurrence.colorHex
         .trimmingCharacters(in: .whitespacesAndNewlines)
         .nonEmptyOrNilForWidget
     ?? event.colorHex
+    let reason: String
+    if primaryColor != nil {
+        reason = "lureliaPrimaryCalendar.color"
+    } else if occurrence.colorHex.trimmingCharacters(in: .whitespacesAndNewlines).nonEmptyOrNilForWidget != nil {
+        reason = "occurrence.colorHex"
+    } else {
+        reason = "event.colorHex"
+    }
+    debugWidgetColorResolution(
+        event: event,
+        primary: primary,
+        occurrence: occurrence,
+        resolvedColor: resolvedColor,
+        reason: reason
+    )
+    return resolvedColor
+}
+
+private func widgetSeriesIcon(
+    for snapshot: LureliaWidgetExternalEventSnapshot,
+    events: [LureliaEvent]
+) -> String? {
+    let occurrenceKey = snapshot.appleOccurrenceKey?
+        .trimmingCharacters(in: .whitespacesAndNewlines)
+        .nonEmptyOrNilForWidget
+    let appleEventIdentifier = snapshot.appleEventIdentifier
+        .trimmingCharacters(in: .whitespacesAndNewlines)
+    let appleSeriesIdentifier = snapshot.appleSeriesIdentifier?
+        .trimmingCharacters(in: .whitespacesAndNewlines)
+        .nonEmptyOrNilForWidget
+        ?? appleEventIdentifier
+
+    let exactIcon = events.first { event in
+        event.isAppleImportedShadow &&
+        occurrenceKey != nil &&
+        event.resolvedAppleOccurrenceKey == occurrenceKey
+    }?
+    .displayIcon
+    .trimmingCharacters(in: .whitespacesAndNewlines)
+
+    let seriesIcon = events
+        .filter { event in
+            event.isAppleImportedShadow &&
+            !appleSeriesIdentifier.isEmpty &&
+            event.resolvedAppleSeriesIdentifier == appleSeriesIdentifier
+        }
+        .sorted { $0.modifiedDate > $1.modifiedDate }
+        .first { event in
+            let icon = event.displayIcon.trimmingCharacters(in: .whitespacesAndNewlines)
+            return !icon.isEmpty && icon != "starcal"
+        }?
+        .displayIcon
+        .trimmingCharacters(in: .whitespacesAndNewlines)
+
+    if let exactIcon, !exactIcon.isEmpty, exactIcon != "starcal" {
+        return exactIcon
+    }
+
+    return seriesIcon ?? exactIcon
+}
+
+private func debugWidgetLocalEventItem(
+    event: LureliaEvent,
+    occurrence: LureliaEventOccurrence,
+    primary: LureliaCalendar?,
+    item: LureliaWidgetEventItem
+) {
+    #if DEBUG
+    print("""
+    [LureliaEventDebug] WIDGET RECEIVED LOCAL/SWIFTDATA EVENT
+    eventID: \(event.id.uuidString)
+    title: \(event.title)
+    originRaw: \(event.eventOriginRaw ?? "nil")
+    resolvedOrigin: \(event.eventOrigin.rawValue)
+    isAppleImportedShadow: \(event.isAppleImportedShadow)
+    appleEventIdentifier: \(event.appleEventIdentifier ?? "nil")
+    appleSeriesIdentifier: \(event.appleSeriesIdentifier ?? "nil")
+    appleOccurrenceKey: \(event.appleOccurrenceKey ?? "nil")
+    appleCalendarID: \(event.appleCalendarIdentifier ?? "nil")
+    appleCalendarTitle: \(event.appleCalendarTitle ?? "nil")
+    appleCalendarColor: \(event.appleCalendarColor ?? "nil")
+    lureliaCalendar: \(primary?.name ?? "nil")
+    lureliaCalendarColor: \(primary?.color ?? "nil")
+    eventColor: \(event.colorHex)
+    occurrenceColor: \(occurrence.colorHex)
+    itemColor: \(item.colorHex)
+    eventIcon: \(event.displayIcon)
+    itemIcon: \(item.icon)
+    occurrenceStart: \(occurrence.start)
+    occurrenceEnd: \(occurrence.end)
+    """)
+    #endif
+}
+
+private func debugWidgetExternalSnapshotItem(
+    snapshot: LureliaWidgetExternalEventSnapshot,
+    item: LureliaWidgetEventItem
+) {
+    #if DEBUG
+    print("""
+    [LureliaEventDebug] WIDGET RECEIVED EXTERNAL SNAPSHOT ITEM
+    title: \(snapshot.title)
+    appleEventIdentifier: \(snapshot.appleEventIdentifier)
+    appleSeriesIdentifier: \(snapshot.appleSeriesIdentifier ?? "nil")
+    appleOccurrenceKey: \(snapshot.appleOccurrenceKey ?? "nil")
+    calendarIdentifier: \(snapshot.calendarIdentifier)
+    calendarTitle: \(snapshot.calendarTitle)
+    snapshotColor: \(snapshot.colorHex)
+    itemColor: \(item.colorHex)
+    snapshotIcon: \(snapshot.icon ?? "nil")
+    itemIcon: \(item.icon)
+    start: \(snapshot.start)
+    end: \(snapshot.end)
+    isAllDay: \(snapshot.isAllDay)
+    """)
+    #endif
+}
+
+private func debugWidgetFinalItems(_ items: [LureliaWidgetEventItem]) {
+    #if DEBUG
+    print("[LureliaEventDebug] WIDGET FINAL ITEMS count: \(items.count)")
+    for item in items {
+        print("""
+        [LureliaEventDebug] WIDGET FINAL ITEM
+        id: \(item.id)
+        title: \(item.title)
+        icon: \(item.icon)
+        colorHex: \(item.colorHex)
+        calendarName: \(item.calendarName ?? "nil")
+        start: \(item.start)
+        end: \(item.end)
+        isAllDay: \(item.isAllDay)
+        """)
+    }
+    #endif
+}
+
+private func debugWidgetColorResolution(
+    event: LureliaEvent,
+    primary: LureliaCalendar?,
+    occurrence: LureliaEventOccurrence,
+    resolvedColor: String,
+    reason: String
+) {
+    #if DEBUG
+    print("""
+    [LureliaEventDebug] WIDGET COLOR RESOLUTION
+    eventID: \(event.id.uuidString)
+    title: \(event.title)
+    originRaw: \(event.eventOriginRaw ?? "nil")
+    resolvedOrigin: \(event.eventOrigin.rawValue)
+    isAppleImportedShadow: \(event.isAppleImportedShadow)
+    appleCalendarColor: \(event.appleCalendarColor ?? "nil")
+    appleSeriesIdentifier: \(event.appleSeriesIdentifier ?? "nil")
+    lureliaCalendar: \(primary?.name ?? "nil")
+    lureliaCalendarColor: \(primary?.color ?? "nil")
+    eventColor: \(event.colorHex)
+    occurrenceColor: \(occurrence.colorHex)
+    resolvedColor: \(resolvedColor)
+    reason: \(reason)
+    icon: \(event.displayIcon)
+    """)
+    #endif
+}
+
+private func debugWidgetIconRender(
+    requestedName: String,
+    resolvedIconName: String,
+    renderPath: String
+) {
+    #if DEBUG
+    print("""
+    [LureliaEventDebug] WIDGET ICON RENDER
+    requestedName: \(requestedName)
+    resolvedIconName: \(resolvedIconName)
+    renderPath: \(renderPath)
+    requestedAssetExists: \(LureliaWidgetShared.widgetIcon(for: resolvedIconName) != nil)
+    starcalFallbackExists: \(LureliaWidgetShared.widgetIcon(for: "starcal") != nil)
+    """)
+    #endif
 }
 
 // MARK: - View
@@ -477,6 +671,11 @@ struct LureliaUpcomingEventsWidgetView: View {
         let iconName = trimmedName.isEmpty ? "starcal" : trimmedName
 
         if let uiImage = LureliaWidgetShared.widgetIcon(for: iconName) {
+            let _ = debugWidgetIconRender(
+                requestedName: name,
+                resolvedIconName: iconName,
+                renderPath: "requested-widget-png"
+            )
             tint
                 .mask(
                     Image(uiImage: uiImage)
@@ -486,6 +685,11 @@ struct LureliaUpcomingEventsWidgetView: View {
                 )
                 .frame(width: size, height: size)
         } else if let fallbackImage = LureliaWidgetShared.widgetIcon(for: "starcal") {
+            let _ = debugWidgetIconRender(
+                requestedName: name,
+                resolvedIconName: iconName,
+                renderPath: "starcal-widget-png-fallback"
+            )
             tint
                 .mask(
                     Image(uiImage: fallbackImage)
@@ -495,6 +699,11 @@ struct LureliaUpcomingEventsWidgetView: View {
                 )
                 .frame(width: size, height: size)
         } else {
+            let _ = debugWidgetIconRender(
+                requestedName: name,
+                resolvedIconName: iconName,
+                renderPath: "system-calendar-fallback"
+            )
             Image(systemName: "calendar")
                 .resizable()
                 .scaledToFit()

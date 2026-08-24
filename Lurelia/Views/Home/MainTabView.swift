@@ -79,9 +79,14 @@ enum LureliaTab: CaseIterable {
 }
 
 struct MainTabView: View {
+    @Environment(\.modelContext) private var modelContext
+    @Environment(\.horizontalSizeClass) private var horizontalSizeClass
+
     @State private var selectedTab: LureliaTab = .kantime
     @State private var activeRoutineToOpen: RoutineWrapper?
+    @State private var showingReleaseNotes = false
     
+    @Query private var settings: [UserSettings]
     @Query private var routineRuns: [LureliaRoutineRun]
     
     private var activeRoutineRun: LureliaRoutineRun? {
@@ -118,6 +123,22 @@ struct MainTabView: View {
         .fullScreenCover(item: $activeRoutineToOpen) { wrapper in
             RoutineRunView(routine: wrapper.routine)
         }
+        .adaptiveReleaseNotesPresentation(
+            isPresented: $showingReleaseNotes,
+            useFullScreenCover: horizontalSizeClass == .regular,
+            onDismiss: markLatestReleaseNoteSeen
+        ) {
+            ReleaseNotesPage()
+                .presentationDetents([.large])
+                .presentationDragIndicator(.hidden)
+        }
+        .task {
+            presentReleaseNotesIfNeeded()
+        }
+        .onChange(of: selectedTab) { _, newTab in
+            guard newTab == .kantime else { return }
+            presentReleaseNotesIfNeeded()
+        }
     }
 
     @ViewBuilder
@@ -139,6 +160,48 @@ struct MainTabView: View {
             RoutinesView()
         case .profile:
             ProfileView()
+        }
+    }
+
+    private func presentReleaseNotesIfNeeded() {
+        guard selectedTab == .kantime,
+              !showingReleaseNotes,
+              let userSettings = settings.first,
+              let latestReleaseNoteID = ReleaseNotesCatalog.notes.first?.id,
+              latestReleaseNoteID != userSettings.lastSeenReleaseNoteID
+        else {
+            return
+        }
+
+        showingReleaseNotes = true
+    }
+
+    private func markLatestReleaseNoteSeen() {
+        guard let latestReleaseNoteID = ReleaseNotesCatalog.notes.first?.id,
+              let userSettings = settings.first,
+              userSettings.lastSeenReleaseNoteID != latestReleaseNoteID
+        else {
+            return
+        }
+
+        userSettings.lastSeenReleaseNoteID = latestReleaseNoteID
+        userSettings.updatedAt = Date()
+        try? modelContext.save()
+    }
+}
+
+private extension View {
+    @ViewBuilder
+    func adaptiveReleaseNotesPresentation<Content: View>(
+        isPresented: Binding<Bool>,
+        useFullScreenCover: Bool,
+        onDismiss: @escaping () -> Void,
+        @ViewBuilder content: @escaping () -> Content
+    ) -> some View {
+        if useFullScreenCover {
+            fullScreenCover(isPresented: isPresented, onDismiss: onDismiss, content: content)
+        } else {
+            sheet(isPresented: isPresented, onDismiss: onDismiss, content: content)
         }
     }
 }

@@ -19,6 +19,7 @@ struct LureliaAppleCalendarSource: Identifiable, Hashable {
 struct LureliaExternalCalendarOccurrence: Identifiable, Hashable {
     let id: String
     let appleEventIdentifier: String
+    let appleSeriesIdentifier: String
     let appleOccurrenceKey: String
     let calendarIdentifier: String
     let calendarTitle: String
@@ -30,6 +31,27 @@ struct LureliaExternalCalendarOccurrence: Identifiable, Hashable {
     let end: Date
     let isAllDay: Bool
     let isRecurring: Bool
+    let icon: String?
+
+    func withIcon(_ icon: String?) -> LureliaExternalCalendarOccurrence {
+        LureliaExternalCalendarOccurrence(
+            id: id,
+            appleEventIdentifier: appleEventIdentifier,
+            appleSeriesIdentifier: appleSeriesIdentifier,
+            appleOccurrenceKey: appleOccurrenceKey,
+            calendarIdentifier: calendarIdentifier,
+            calendarTitle: calendarTitle,
+            title: title,
+            notes: notes,
+            location: location,
+            colorHex: colorHex,
+            start: start,
+            end: end,
+            isAllDay: isAllDay,
+            isRecurring: isRecurring,
+            icon: icon
+        )
+    }
 }
 
 @MainActor
@@ -113,6 +135,7 @@ final class LureliaEventService: ObservableObject {
                 allowsContentModifications: $0.allowsContentModifications
             )
         }
+        debugAppleCalendarSnapshotExport(snapshots)
         if LureliaWidgetShared.saveAppleCalendarSnapshots(snapshots) {
             LureliaWidgetReloads.reloadAll()
         }
@@ -137,19 +160,22 @@ final class LureliaEventService: ObservableObject {
                 return nil
             }
 
+            let seriesIdentifier = event.calendarItemIdentifier.trimmingCharacters(in: .whitespacesAndNewlines)
+            let appleSeriesIdentifier = seriesIdentifier.isEmpty ? eventIdentifier : seriesIdentifier
             let calendarColor = event.calendar.cgColor?.lureliaHexString ?? "#03dbfc"
             let isRecurring = event.hasRecurrenceRules
             let occurrenceKey = LureliaEvent.appleShadowKey(
-                appleEventIdentifier: eventIdentifier,
+                appleEventIdentifier: appleSeriesIdentifier,
                 occurrenceStart: event.startDate,
                 occurrenceEnd: event.endDate,
                 isRecurring: isRecurring
             )
             guard !occurrenceKey.isEmpty else { return nil }
 
-            return LureliaExternalCalendarOccurrence(
+            let occurrence = LureliaExternalCalendarOccurrence(
                 id: occurrenceKey,
                 appleEventIdentifier: eventIdentifier,
+                appleSeriesIdentifier: appleSeriesIdentifier,
                 appleOccurrenceKey: occurrenceKey,
                 calendarIdentifier: event.calendar.calendarIdentifier,
                 calendarTitle: event.calendar.title,
@@ -160,10 +186,26 @@ final class LureliaEventService: ObservableObject {
                 start: event.startDate,
                 end: event.endDate,
                 isAllDay: event.isAllDay,
-                isRecurring: isRecurring
+                isRecurring: isRecurring,
+                icon: nil
             )
+            debugAppleOccurrenceLoad(occurrence)
+            return occurrence
         }
         .sorted { $0.start < $1.start }
+    }
+
+    func appleSeriesIdentifier(for eventIdentifier: String) -> String? {
+        let identifier = eventIdentifier.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard hasCalendarAccess,
+              !identifier.isEmpty,
+              let event = eventStore.event(withIdentifier: identifier)
+        else {
+            return nil
+        }
+
+        let seriesIdentifier = event.calendarItemIdentifier.trimmingCharacters(in: .whitespacesAndNewlines)
+        return seriesIdentifier.isEmpty ? identifier : seriesIdentifier
     }
 
     func saveToAppleCalendar(_ event: LureliaEvent, calendarIdentifier: String?) throws {
@@ -208,6 +250,9 @@ final class LureliaEventService: ObservableObject {
 
         try eventStore.save(appleEvent, span: .futureEvents)
         event.appleEventIdentifier = appleEvent.eventIdentifier
+        let seriesIdentifier = appleEvent.calendarItemIdentifier.trimmingCharacters(in: .whitespacesAndNewlines)
+        let savedEventIdentifier = appleEvent.eventIdentifier?.trimmingCharacters(in: .whitespacesAndNewlines)
+        event.appleSeriesIdentifier = seriesIdentifier.isEmpty ? savedEventIdentifier : seriesIdentifier
         event.appleCalendarIdentifier = appleEvent.calendar.calendarIdentifier
         event.appleCalendarTitle = appleEvent.calendar.title.trimmingCharacters(in: .whitespacesAndNewlines)
         event.appleCalendarColor = appleEvent.calendar.cgColor?.lureliaHexString ?? event.appleCalendarColor
@@ -270,6 +315,7 @@ final class LureliaEventService: ObservableObject {
 
         try eventStore.remove(appleEvent, span: .futureEvents)
         event.appleEventIdentifier = nil
+        event.appleSeriesIdentifier = nil
         event.appleCalendarIdentifier = nil
         event.syncsWithAppleCalendar = false
         event.modifiedDate = Date()
@@ -328,8 +374,12 @@ final class LureliaEventService: ObservableObject {
         let existing = (try? context.fetch(descriptor)) ?? []
 
         var didInsertOrUpdate = false
-        for event in existing where event.applyInferredEventOriginIfNeeded() {
-            didInsertOrUpdate = true
+        for event in existing {
+            let before = event.eventOriginRaw
+            if event.applyInferredEventOriginIfNeeded() {
+                debugEventOriginMigration(event, previousOriginRaw: before)
+                didInsertOrUpdate = true
+            }
         }
 
         for external in uniqueOccurrences {
@@ -346,14 +396,18 @@ final class LureliaEventService: ObservableObject {
             let candidates = LureliaEvent.appleShadowCandidates(
                 in: existing,
                 appleEventIdentifier: external.appleEventIdentifier,
+                appleSeriesIdentifier: external.appleSeriesIdentifier,
                 appleOccurrenceKey: external.appleOccurrenceKey
             )
             if let target = LureliaEvent.preferredAppleShadow(
                 in: existing,
                 appleEventIdentifier: external.appleEventIdentifier,
+                appleSeriesIdentifier: external.appleSeriesIdentifier,
                 appleOccurrenceKey: external.appleOccurrenceKey
             ) {
+                debugAppleImportTarget(stage: "existing-before-update", target: target, external: external, ekEvent: ekEvent)
                 target.markAppleImportedShadow()
+                target.appleSeriesIdentifier = external.appleSeriesIdentifier
                 target.appleOccurrenceKey = external.appleOccurrenceKey
                 for duplicate in candidates where duplicate.id != target.id {
                     mergeAppleShadow(duplicate, into: target)
@@ -402,6 +456,7 @@ final class LureliaEventService: ObservableObject {
                         didInsertOrUpdate = true
                     }
 
+                    debugAppleImportTarget(stage: "existing-skip-apple-unchanged", target: target, external: external, ekEvent: ekEvent)
                     continue
                 }
                 applyAppleOwnedFields(
@@ -409,6 +464,7 @@ final class LureliaEventService: ObservableObject {
                     from: ekEvent,
                     calendarIdentifier: external.calendarIdentifier
                 )
+                debugAppleImportTarget(stage: "existing-after-apply-apple-fields", target: target, external: external, ekEvent: ekEvent)
                 didInsertOrUpdate = true
             } else {
                 let target = LureliaEvent()
@@ -424,8 +480,10 @@ final class LureliaEventService: ObservableObject {
                 target.color = target.appleCalendarColor ?? external.colorHex
                 target.categoryName = nil
                 target.appleEventIdentifier = external.appleEventIdentifier
+                target.appleSeriesIdentifier = external.appleSeriesIdentifier
                 target.appleOccurrenceKey = external.appleOccurrenceKey
                 target.syncsWithAppleCalendar = true
+                debugAppleImportTarget(stage: "fresh-shadow-created", target: target, external: external, ekEvent: ekEvent)
                 didInsertOrUpdate = true
             }
         }
@@ -456,6 +514,10 @@ final class LureliaEventService: ObservableObject {
         target.endTime = ekEvent.isAllDay ? nil : ekEvent.endDate
         target.duration = max(0, ekEvent.endDate.timeIntervalSince(ekEvent.startDate))
         target.isAllDay = ekEvent.isAllDay
+        let seriesIdentifier = ekEvent.calendarItemIdentifier.trimmingCharacters(in: .whitespacesAndNewlines)
+        target.appleSeriesIdentifier = seriesIdentifier.isEmpty
+            ? target.appleEventIdentifier
+            : seriesIdentifier
         target.appleCalendarIdentifier = calendarIdentifier
         // Cache the source Apple calendar's display title so the events
         // list can show "Rare Days • All day" for imported shadow events
@@ -552,6 +614,102 @@ final class LureliaEventService: ObservableObject {
             setPositions: nil,
             end: end
         )
+    }
+
+    private func debugAppleCalendarSnapshotExport(_ snapshots: [LureliaWidgetAppleCalendarSnapshot]) {
+        #if DEBUG
+        print("[LureliaEventDebug] APPLE CALENDAR SNAPSHOT EXPORT count: \(snapshots.count)")
+        for snapshot in snapshots {
+            print("""
+            [LureliaEventDebug] APPLE CALENDAR SNAPSHOT
+            id: \(snapshot.id)
+            title: \(snapshot.title)
+            colorHex: \(snapshot.colorHex)
+            allowsContentModifications: \(snapshot.allowsContentModifications)
+            iconField: not present in LureliaWidgetAppleCalendarSnapshot
+            """)
+        }
+        #endif
+    }
+
+    private func debugAppleOccurrenceLoad(_ occurrence: LureliaExternalCalendarOccurrence) {
+        #if DEBUG
+        print("""
+        [LureliaEventDebug] APPLE EVENT LOAD
+        title: \(occurrence.title)
+        appleEventIdentifier: \(occurrence.appleEventIdentifier)
+        appleSeriesIdentifier: \(occurrence.appleSeriesIdentifier)
+        appleOccurrenceKey: \(occurrence.appleOccurrenceKey)
+        appleCalendarID: \(occurrence.calendarIdentifier)
+        appleCalendarTitle: \(occurrence.calendarTitle)
+        appleCalendarColor: \(occurrence.colorHex)
+        start: \(occurrence.start)
+        end: \(occurrence.end)
+        isAllDay: \(occurrence.isAllDay)
+        isRecurring: \(occurrence.isRecurring)
+        iconField: not present in LureliaExternalCalendarOccurrence
+        """)
+        #endif
+    }
+
+    private func debugEventOriginMigration(_ event: LureliaEvent, previousOriginRaw: String?) {
+        #if DEBUG
+        print("""
+        [LureliaEventDebug] EVENT ORIGIN INFERRED
+        id: \(event.id.uuidString)
+        title: \(event.title)
+        previousOriginRaw: \(previousOriginRaw ?? "nil")
+        newOriginRaw: \(event.eventOriginRaw ?? "nil")
+        resolvedOrigin: \(event.eventOrigin.rawValue)
+        appleEventIdentifier: \(event.appleEventIdentifier ?? "nil")
+        appleSeriesIdentifier: \(event.appleSeriesIdentifier ?? "nil")
+        appleOccurrenceKey: \(event.appleOccurrenceKey ?? "nil")
+        appleCalendarID: \(event.appleCalendarIdentifier ?? "nil")
+        appleCalendarColor: \(event.appleCalendarColor ?? "nil")
+        lureliaCalendar: \(event.calendar?.name ?? "nil")
+        lureliaCalendarColor: \(event.calendar?.color ?? "nil")
+        eventColor: \(event.colorHex)
+        icon: \(event.displayIcon)
+        """)
+        #endif
+    }
+
+    private func debugAppleImportTarget(
+        stage: String,
+        target: LureliaEvent,
+        external: LureliaExternalCalendarOccurrence,
+        ekEvent: EKEvent
+    ) {
+        #if DEBUG
+        let liveColor = ekEvent.calendar.cgColor?.lureliaHexString ?? external.colorHex
+        print("""
+        [LureliaEventDebug] APPLE IMPORT TARGET
+        stage: \(stage)
+        targetID: \(target.id.uuidString)
+        title: \(target.title)
+        originRaw: \(target.eventOriginRaw ?? "nil")
+        resolvedOrigin: \(target.eventOrigin.rawValue)
+        appleEventIdentifier: \(target.appleEventIdentifier ?? "nil")
+        externalAppleEventIdentifier: \(external.appleEventIdentifier)
+        appleSeriesIdentifier: \(target.appleSeriesIdentifier ?? "nil")
+        externalAppleSeriesIdentifier: \(external.appleSeriesIdentifier)
+        appleOccurrenceKey: \(target.appleOccurrenceKey ?? "nil")
+        externalAppleOccurrenceKey: \(external.appleOccurrenceKey)
+        appleCalendarID: \(target.appleCalendarIdentifier ?? "nil")
+        externalAppleCalendarID: \(external.calendarIdentifier)
+        appleCalendarTitle: \(target.appleCalendarTitle ?? "nil")
+        externalAppleCalendarTitle: \(external.calendarTitle)
+        appleCalendarColor: \(target.appleCalendarColor ?? "nil")
+        externalAppleCalendarColor: \(external.colorHex)
+        liveAppleCalendarColor: \(liveColor)
+        lureliaCalendar: \(target.calendar?.name ?? "nil")
+        lureliaCalendarID: \(target.calendar?.id.uuidString ?? "nil")
+        lureliaCalendarColor: \(target.calendar?.color ?? "nil")
+        eventColor: \(target.colorHex)
+        displayColor: \(target.displayColorHex)
+        icon: \(target.displayIcon)
+        """)
+        #endif
     }
 }
 

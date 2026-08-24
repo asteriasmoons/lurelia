@@ -48,6 +48,7 @@ struct LureliaAppleEventDetailView: View {
         return LureliaEvent.preferredAppleShadow(
             in: importedEvents,
             appleEventIdentifier: appleEventIdentifier,
+            appleSeriesIdentifier: appleSeriesIdentifier,
             appleOccurrenceKey: appleOccurrenceKey
         )
     }
@@ -89,16 +90,16 @@ struct LureliaAppleEventDetailView: View {
             .navigationBarBackButtonHidden(true)
             .toolbar(.hidden, for: .navigationBar)
             .sheet(isPresented: $isIconPickerPresented) {
-                if let importedEvent {
-                    LureliaIconPickerView(selectedIcon: Binding(
-                        get: { importedEvent.displayIcon },
-                        set: { newIcon in
-                            importedEvent.icon = newIcon
-                            importedEvent.modifiedDate = Date()
-                            try? modelContext.save()
-                        }
-                    ))
-                }
+                LureliaIconPickerView(selectedIcon: Binding(
+                    get: { displayIcon },
+                    set: { newIcon in
+                        applyIconToImportedEventSeries(newIcon)
+                    }
+                ))
+            }
+            .onAppear {
+                backfillAppleSeriesIdentifierIfNeeded()
+                debugAppleDetailLoaded()
             }
         }
     }
@@ -140,9 +141,7 @@ struct LureliaAppleEventDetailView: View {
                         .frame(width: 70, height: 70)
 
                     Button {
-                        if importedEvent != nil {
-                            isIconPickerPresented = true
-                        }
+                        isIconPickerPresented = true
                     } label: {
                         LureliaIconView(iconId: displayIcon, size: 36)
                             .foregroundStyle(.white)
@@ -472,9 +471,13 @@ struct LureliaAppleEventDetailView: View {
     private var displayIcon: String {
         switch source {
         case .liveOccurrence:
-            return "starcal"
+            return recurringSeriesIcon ?? "starcal"
         case .shadowEvent(let event):
-            return event.displayIcon
+            let icon = event.displayIcon.trimmingCharacters(in: .whitespacesAndNewlines)
+            if isRecurringAppleEvent, icon == "starcal" {
+                return recurringSeriesIcon ?? "starcal"
+            }
+            return icon.isEmpty ? "starcal" : icon
         }
     }
 
@@ -484,6 +487,15 @@ struct LureliaAppleEventDetailView: View {
             return occurrence.appleEventIdentifier
         case .shadowEvent(let event):
             return event.appleEventIdentifier?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        }
+    }
+
+    private var appleSeriesIdentifier: String {
+        switch source {
+        case .liveOccurrence(let occurrence):
+            return occurrence.appleSeriesIdentifier
+        case .shadowEvent(let event):
+            return event.resolvedAppleSeriesIdentifier ?? ""
         }
     }
 
@@ -552,6 +564,35 @@ struct LureliaAppleEventDetailView: View {
         }
     }
 
+    private var isRecurringAppleEvent: Bool {
+        switch source {
+        case .liveOccurrence(let occurrence):
+            return occurrence.isRecurring
+        case .shadowEvent(let event):
+            return (event.appleOccurrenceKey ?? "")
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+                .contains(":occurrence:")
+        }
+    }
+
+    private var recurringSeriesShadows: [LureliaEvent] {
+        let identifier = appleSeriesIdentifier.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !identifier.isEmpty else { return [] }
+
+        return importedEvents.filter { event in
+            event.isAppleImportedShadow &&
+            event.resolvedAppleSeriesIdentifier == identifier
+        }
+    }
+
+    private var recurringSeriesIcon: String? {
+        let candidates = recurringSeriesShadows
+            .sorted { $0.modifiedDate > $1.modifiedDate }
+            .map { $0.displayIcon.trimmingCharacters(in: .whitespacesAndNewlines) }
+
+        return candidates.first { !$0.isEmpty && $0 != "starcal" }
+    }
+
     private var location: String? {
         switch source {
         case .liveOccurrence(let occurrence):
@@ -594,8 +635,10 @@ struct LureliaAppleEventDetailView: View {
         guard !appleEventIdentifier.isEmpty, !appleOccurrenceKey.isEmpty else { return }
 
         let target = importedEvent ?? makeImportedEventShadow()
+        debugAppleDetailAssignment(stage: "before-assignment", target: target, calendar: calendar)
         target.markAppleImportedShadow()
         target.appleEventIdentifier = appleEventIdentifier
+        target.appleSeriesIdentifier = appleSeriesIdentifier
         target.appleOccurrenceKey = appleOccurrenceKey
         target.calendar = calendar
         target.color = target.appleCalendarColor ?? sourceColorHex
@@ -604,13 +647,120 @@ struct LureliaAppleEventDetailView: View {
 
         try? modelContext.save()
         WidgetCenter.shared.reloadAllTimelines()
+        debugAppleDetailAssignment(stage: "after-assignment", target: target, calendar: calendar)
+    }
+
+    private func backfillAppleSeriesIdentifierIfNeeded() {
+        guard let event = importedEvent else { return }
+
+        let storedSeriesIdentifier = event.appleSeriesIdentifier?
+            .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        guard storedSeriesIdentifier.isEmpty else { return }
+
+        let storedEventIdentifier = event.appleEventIdentifier?
+            .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        guard let seriesIdentifier = LureliaEventService.shared.appleSeriesIdentifier(for: storedEventIdentifier),
+              !seriesIdentifier.isEmpty
+        else { return }
+
+        event.appleSeriesIdentifier = seriesIdentifier
+        event.modifiedDate = Date()
+        try? modelContext.save()
+    }
+
+    private func applyIconToImportedEventSeries(_ newIcon: String) {
+        let cleanIcon = newIcon.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !cleanIcon.isEmpty, !appleEventIdentifier.isEmpty, !appleOccurrenceKey.isEmpty else { return }
+
+        let target = importedEvent ?? makeImportedEventShadow()
+        debugAppleDetailIconUpdate(event: target, newIcon: cleanIcon)
+
+        let targets: [LureliaEvent]
+        if isRecurringAppleEvent {
+            var seen = Set<UUID>()
+            targets = ([target] + recurringSeriesShadows).filter { event in
+                seen.insert(event.id).inserted
+            }
+        } else {
+            targets = [target]
+        }
+
+        for event in targets {
+            event.markAppleImportedShadow()
+            event.icon = cleanIcon
+            event.modifiedDate = Date()
+        }
+
+        consolidateImportedShadowDuplicates(into: target)
+        try? modelContext.save()
+        exportIconForWidget(cleanIcon)
+        WidgetCenter.shared.reloadAllTimelines()
+        debugAppleDetailSeriesIconUpdate(target: target, newIcon: cleanIcon, updatedCount: targets.count)
+    }
+
+    private func exportIconForWidget(_ iconName: String) {
+        let cleanIcon = iconName.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !cleanIcon.isEmpty,
+              let sourceImage = UIImage(named: cleanIcon)
+        else {
+            debugAppleDetailWidgetIconExport(iconName: cleanIcon, result: "missing-source-asset")
+            return
+        }
+
+        let iconDirectory = LureliaWidgetShared.appGroupContainerURL
+            .appendingPathComponent("widget_icons", isDirectory: true)
+
+        do {
+            try FileManager.default.createDirectory(
+                at: iconDirectory,
+                withIntermediateDirectories: true
+            )
+        } catch {
+            debugAppleDetailWidgetIconExport(iconName: cleanIcon, result: "directory-error-\(error.localizedDescription)")
+            return
+        }
+
+        let iconSize = CGSize(width: 72, height: 72)
+        let rendererFormat = UIGraphicsImageRendererFormat.default()
+        rendererFormat.scale = UIScreen.main.scale
+        rendererFormat.opaque = false
+        let renderer = UIGraphicsImageRenderer(size: iconSize, format: rendererFormat)
+
+        let pngData = renderer.pngData { _ in
+            let sourceSize = sourceImage.size
+            guard sourceSize.width > 0, sourceSize.height > 0 else { return }
+
+            let scale = min(iconSize.width / sourceSize.width, iconSize.height / sourceSize.height)
+            let fittedSize = CGSize(
+                width: sourceSize.width * scale,
+                height: sourceSize.height * scale
+            )
+            let fittedOrigin = CGPoint(
+                x: (iconSize.width - fittedSize.width) / 2,
+                y: (iconSize.height - fittedSize.height) / 2
+            )
+
+            sourceImage.withRenderingMode(.alwaysTemplate)
+                .withTintColor(.white)
+                .draw(in: CGRect(origin: fittedOrigin, size: fittedSize))
+        }
+
+        do {
+            try pngData.write(
+                to: iconDirectory.appendingPathComponent("\(cleanIcon).png"),
+                options: .atomic
+            )
+            debugAppleDetailWidgetIconExport(iconName: cleanIcon, result: "exported")
+        } catch {
+            debugAppleDetailWidgetIconExport(iconName: cleanIcon, result: "write-error-\(error.localizedDescription)")
+        }
     }
 
     private func makeImportedEventShadow() -> LureliaEvent {
         let target = LureliaEvent()
         target.title = title.isEmpty ? "Untitled Event" : title
         target.eventDescription = descriptionText.nonEmptyOrNil
-        target.icon = "starcal"
+        target.icon = recurringSeriesIcon ?? "starcal"
         target.color = sourceColorHex
         target.locationName = location
         target.startDate = startDate
@@ -620,6 +770,7 @@ struct LureliaAppleEventDetailView: View {
         target.duration = max(0, endDate.timeIntervalSince(startDate))
         target.isAllDay = isAllDay
         target.appleEventIdentifier = appleEventIdentifier
+        target.appleSeriesIdentifier = appleSeriesIdentifier
         target.appleOccurrenceKey = appleOccurrenceKey
         target.appleCalendarIdentifier = appleCalendarIdentifier
         target.appleCalendarTitle = appleCalendarTitle.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -636,6 +787,7 @@ struct LureliaAppleEventDetailView: View {
         let candidates = LureliaEvent.appleShadowCandidates(
             in: importedEvents,
             appleEventIdentifier: appleEventIdentifier,
+            appleSeriesIdentifier: appleSeriesIdentifier,
             appleOccurrenceKey: appleOccurrenceKey
         )
 
@@ -700,11 +852,123 @@ struct LureliaAppleEventDetailView: View {
             UIApplication.shared.open(url)
         }
     }
+
+    private func debugAppleDetailLoaded() {
+        #if DEBUG
+        let event = importedEvent
+        print("""
+        [LureliaEventDebug] APPLE DETAIL LOAD
+        source: \(source.debugName)
+        title: \(title)
+        displayIcon: \(displayIcon)
+        sourceColorHex: \(sourceColorHex)
+        appleEventIdentifier: \(appleEventIdentifier)
+        appleSeriesIdentifier: \(appleSeriesIdentifier)
+        appleOccurrenceKey: \(appleOccurrenceKey)
+        appleCalendarID: \(appleCalendarIdentifier)
+        appleCalendarTitle: \(appleCalendarTitle)
+        selectedLureliaCalendar: \(selectedLureliaCalendar?.name ?? "nil")
+        selectedLureliaCalendarID: \(selectedLureliaCalendar?.id.uuidString ?? "nil")
+        selectedLureliaCalendarColor: \(selectedLureliaCalendar?.color ?? "nil")
+        importedEventID: \(event?.id.uuidString ?? "nil")
+        importedEventOriginRaw: \(event?.eventOriginRaw ?? "nil")
+        importedEventResolvedOrigin: \(event?.eventOrigin.rawValue ?? "nil")
+        importedEventIcon: \(event?.displayIcon ?? "nil")
+        importedEventColor: \(event?.colorHex ?? "nil")
+        importedEventAppleColor: \(event?.appleCalendarColor ?? "nil")
+        importedEventDisplayColor: \(event?.displayColorHex ?? "nil")
+        """)
+        #endif
+    }
+
+    private func debugAppleDetailIconUpdate(event: LureliaEvent, newIcon: String) {
+        #if DEBUG
+        print("""
+        [LureliaEventDebug] APPLE DETAIL ICON UPDATE
+        eventID: \(event.id.uuidString)
+        title: \(event.title)
+        oldIcon: \(event.displayIcon)
+        newIcon: \(newIcon)
+        originRaw: \(event.eventOriginRaw ?? "nil")
+        resolvedOrigin: \(event.eventOrigin.rawValue)
+        appleEventIdentifier: \(event.appleEventIdentifier ?? "nil")
+        appleSeriesIdentifier: \(event.appleSeriesIdentifier ?? "nil")
+        appleOccurrenceKey: \(event.appleOccurrenceKey ?? "nil")
+        appleCalendarID: \(event.appleCalendarIdentifier ?? "nil")
+        appleCalendarTitle: \(event.appleCalendarTitle ?? "nil")
+        appleCalendarColor: \(event.appleCalendarColor ?? "nil")
+        lureliaCalendar: \(event.calendar?.name ?? "nil")
+        lureliaCalendarColor: \(event.calendar?.color ?? "nil")
+        """)
+        #endif
+    }
+
+    private func debugAppleDetailSeriesIconUpdate(
+        target: LureliaEvent,
+        newIcon: String,
+        updatedCount: Int
+    ) {
+        #if DEBUG
+        print("""
+        [LureliaEventDebug] APPLE DETAIL SERIES ICON UPDATE
+        targetEventID: \(target.id.uuidString)
+        title: \(target.title)
+        newIcon: \(newIcon)
+        updatedShadowCount: \(updatedCount)
+        isRecurringAppleEvent: \(isRecurringAppleEvent)
+        appleEventIdentifier: \(appleEventIdentifier)
+        appleSeriesIdentifier: \(appleSeriesIdentifier)
+        appleOccurrenceKey: \(appleOccurrenceKey)
+        """)
+        #endif
+    }
+
+    private func debugAppleDetailWidgetIconExport(iconName: String, result: String) {
+        #if DEBUG
+        print("[LureliaEventDebug] APPLE DETAIL WIDGET ICON EXPORT iconName=\(iconName) result=\(result)")
+        #endif
+    }
+
+    private func debugAppleDetailAssignment(
+        stage: String,
+        target: LureliaEvent,
+        calendar: LureliaCalendar?
+    ) {
+        #if DEBUG
+        print("""
+        [LureliaEventDebug] APPLE DETAIL CALENDAR ASSIGNMENT
+        stage: \(stage)
+        eventID: \(target.id.uuidString)
+        title: \(target.title)
+        originRaw: \(target.eventOriginRaw ?? "nil")
+        resolvedOrigin: \(target.eventOrigin.rawValue)
+        appleEventIdentifier: \(target.appleEventIdentifier ?? "nil")
+        appleSeriesIdentifier: \(target.appleSeriesIdentifier ?? "nil")
+        appleOccurrenceKey: \(target.appleOccurrenceKey ?? "nil")
+        appleCalendarID: \(target.appleCalendarIdentifier ?? "nil")
+        appleCalendarTitle: \(target.appleCalendarTitle ?? "nil")
+        appleCalendarColor: \(target.appleCalendarColor ?? "nil")
+        assignedLureliaCalendar: \(calendar?.name ?? "nil")
+        assignedLureliaCalendarID: \(calendar?.id.uuidString ?? "nil")
+        assignedLureliaCalendarColor: \(calendar?.color ?? "nil")
+        eventColor: \(target.colorHex)
+        displayColor: \(target.displayColorHex)
+        icon: \(target.displayIcon)
+        """)
+        #endif
+    }
 }
 
 private enum LureliaAppleEventDetailSource {
     case liveOccurrence(LureliaExternalCalendarOccurrence)
     case shadowEvent(LureliaEvent)
+
+    var debugName: String {
+        switch self {
+        case .liveOccurrence: return "liveOccurrence"
+        case .shadowEvent: return "shadowEvent"
+        }
+    }
 }
 
 private extension String {

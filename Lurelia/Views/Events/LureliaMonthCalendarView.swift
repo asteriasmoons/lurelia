@@ -159,12 +159,12 @@ struct LureliaMonthCalendarView: View {
 
     private func rows(on day: Date) -> [LureliaEventUnifiedOccurrence] {
         let local = localOccurrences
-            .filter { Calendar.current.isDate($0.start, inSameDayAs: day) || DateInterval(start: $0.start, end: $0.end).contains(day) }
             .map { LureliaEventUnifiedOccurrence.local($0) }
         let external = externalOccurrences
-            .filter { Calendar.current.isDate($0.start, inSameDayAs: day) || DateInterval(start: $0.start, end: $0.end).contains(day) }
             .map { LureliaEventUnifiedOccurrence.apple($0) }
-        return (local + external).sorted { $0.start < $1.start }
+        return LureliaEventUnifiedOccurrence.deduplicated(local + external)
+            .filter { $0.occurs(on: day, calendar: calendar) }
+            .sorted { $0.start < $1.start }
     }
 
     private func moveMonth(_ value: Int) {

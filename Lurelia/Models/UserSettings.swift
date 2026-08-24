@@ -40,6 +40,9 @@ final class UserSettings {
     /// Raw value of the default tab shown when the Events feature opens.
     /// Backed by `LureliaEventsTab.rawValue` — "Agenda" / "Month" / "Week".
     var defaultEventsViewRaw: String = "Agenda"
+    /// The newest release note the user has already dismissed.
+    /// Empty means no release note has been acknowledged yet.
+    var lastSeenReleaseNoteID: String = ""
     /// The Apple Calendar identifier that Lurelia should mirror
     /// Lurelia-authored events into. Used by the bulk-push and by the
     /// event editor's default calendar selection. Nil means "no explicit
@@ -91,6 +94,7 @@ final class UserSettings {
         selectedAppleCalendarIDs: [String] = [],
         showAppleCalendarEvents: Bool = true,
         twoWayAppleCalendarSyncEnabled: Bool = false,
+        lastSeenReleaseNoteID: String = "",
         coinBalance: Int = 0,
         profileImageData: Data? = nil,
         remoteAvatarURL: String? = nil
@@ -105,6 +109,7 @@ final class UserSettings {
         self.selectedAppleCalendarIDs = selectedAppleCalendarIDs
         self.showAppleCalendarEvents = showAppleCalendarEvents
         self.twoWayAppleCalendarSyncEnabled = twoWayAppleCalendarSyncEnabled
+        self.lastSeenReleaseNoteID = lastSeenReleaseNoteID
         self.coinBalance = coinBalance
         self.createdAt = Date()
         self.updatedAt = Date()

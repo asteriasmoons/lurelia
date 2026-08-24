@@ -309,16 +309,11 @@ struct LureliaAgendaView: View {
 
     private var todayRows: [LureliaEventUnifiedOccurrence] {
         let local = localOccurrences
-            .filter { rowMatchesFocusedDay(start: $0.start, end: $0.end) }
             .map { LureliaEventUnifiedOccurrence.local($0) }
         let external = externalOccurrences
-            .filter { rowMatchesFocusedDay(start: $0.start, end: $0.end) }
             .map { LureliaEventUnifiedOccurrence.apple($0) }
-        return (local + external).sorted { $0.start < $1.start }
-    }
-
-    private func rowMatchesFocusedDay(start: Date, end: Date) -> Bool {
-        if calendar.isDate(start, inSameDayAs: focusedDate) { return true }
-        return DateInterval(start: start, end: max(end, start.addingTimeInterval(60))).contains(focusedDate)
+        return LureliaEventUnifiedOccurrence.deduplicated(local + external)
+            .filter { $0.occurs(on: focusedDate, calendar: calendar) }
+            .sorted { $0.start < $1.start }
     }
 }

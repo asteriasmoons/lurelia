@@ -42,10 +42,12 @@ struct LureliaWidgetAppleCalendarSnapshot: Codable, Hashable, Identifiable {
 struct LureliaWidgetExternalEventSnapshot: Codable, Hashable, Identifiable {
     let id: String
     let appleEventIdentifier: String
+    let appleSeriesIdentifier: String?
     let appleOccurrenceKey: String?
     let calendarIdentifier: String
     let calendarTitle: String
     let title: String
+    let icon: String?
     let colorHex: String
     let start: Date
     let end: Date
@@ -101,10 +103,12 @@ enum LureliaWidgetShared {
         }
 
         if defaults.data(forKey: appleCalendarsSnapshotKey) == data {
+            debugAppleCalendarSnapshotSave(normalized, changed: false)
             return false
         }
 
         defaults.set(data, forKey: appleCalendarsSnapshotKey)
+        debugAppleCalendarSnapshotSave(normalized, changed: true)
         return true
     }
 
@@ -115,6 +119,7 @@ enum LureliaWidgetShared {
             return []
         }
 
+        debugAppleCalendarSnapshotLoad(decoded)
         return decoded
     }
 
@@ -125,10 +130,12 @@ enum LureliaWidgetShared {
                 LureliaWidgetExternalEventSnapshot(
                     id: $0.id.trimmingCharacters(in: .whitespacesAndNewlines),
                     appleEventIdentifier: $0.appleEventIdentifier.trimmingCharacters(in: .whitespacesAndNewlines),
+                    appleSeriesIdentifier: $0.appleSeriesIdentifier?.trimmingCharacters(in: .whitespacesAndNewlines),
                     appleOccurrenceKey: $0.appleOccurrenceKey?.trimmingCharacters(in: .whitespacesAndNewlines),
                     calendarIdentifier: $0.calendarIdentifier.trimmingCharacters(in: .whitespacesAndNewlines),
                     calendarTitle: $0.calendarTitle.trimmingCharacters(in: .whitespacesAndNewlines),
                     title: $0.title.trimmingCharacters(in: .whitespacesAndNewlines),
+                    icon: $0.icon?.trimmingCharacters(in: .whitespacesAndNewlines),
                     colorHex: $0.colorHex.trimmingCharacters(in: .whitespacesAndNewlines),
                     start: $0.start,
                     end: $0.end,
@@ -145,10 +152,12 @@ enum LureliaWidgetShared {
         }
 
         if defaults.data(forKey: externalEventsSnapshotKey) == data {
+            debugExternalEventSnapshotSave(normalized, changed: false)
             return false
         }
 
         defaults.set(data, forKey: externalEventsSnapshotKey)
+        debugExternalEventSnapshotSave(normalized, changed: true)
         return true
     }
 
@@ -159,7 +168,90 @@ enum LureliaWidgetShared {
             return []
         }
 
+        debugExternalEventSnapshotLoad(decoded)
         return decoded
+    }
+
+    private static func debugAppleCalendarSnapshotSave(
+        _ snapshots: [LureliaWidgetAppleCalendarSnapshot],
+        changed: Bool
+    ) {
+        #if DEBUG
+        print("[LureliaEventDebug] APP GROUP APPLE CALENDAR SNAPSHOT SAVE changed: \(changed) count: \(snapshots.count)")
+        for snapshot in snapshots {
+            print("""
+            [LureliaEventDebug] APP GROUP APPLE CALENDAR SNAPSHOT SAVE ITEM
+            id: \(snapshot.id)
+            title: \(snapshot.title)
+            colorHex: \(snapshot.colorHex)
+            allowsContentModifications: \(snapshot.allowsContentModifications)
+            iconField: not present in LureliaWidgetAppleCalendarSnapshot
+            """)
+        }
+        #endif
+    }
+
+    private static func debugAppleCalendarSnapshotLoad(_ snapshots: [LureliaWidgetAppleCalendarSnapshot]) {
+        #if DEBUG
+        print("[LureliaEventDebug] WIDGET RECEIVED APPLE CALENDAR SNAPSHOTS count: \(snapshots.count)")
+        for snapshot in snapshots {
+            print("""
+            [LureliaEventDebug] WIDGET RECEIVED APPLE CALENDAR
+            id: \(snapshot.id)
+            title: \(snapshot.title)
+            colorHex: \(snapshot.colorHex)
+            allowsContentModifications: \(snapshot.allowsContentModifications)
+            iconField: not present in LureliaWidgetAppleCalendarSnapshot
+            """)
+        }
+        #endif
+    }
+
+    private static func debugExternalEventSnapshotSave(
+        _ snapshots: [LureliaWidgetExternalEventSnapshot],
+        changed: Bool
+    ) {
+        #if DEBUG
+        print("[LureliaEventDebug] APP GROUP EXTERNAL EVENT SNAPSHOT SAVE changed: \(changed) count: \(snapshots.count)")
+        for snapshot in snapshots {
+            print("""
+            [LureliaEventDebug] APP GROUP EXTERNAL EVENT SNAPSHOT SAVE ITEM
+            title: \(snapshot.title)
+            appleEventIdentifier: \(snapshot.appleEventIdentifier)
+            appleSeriesIdentifier: \(snapshot.appleSeriesIdentifier ?? "nil")
+            appleOccurrenceKey: \(snapshot.appleOccurrenceKey ?? "nil")
+            calendarIdentifier: \(snapshot.calendarIdentifier)
+            calendarTitle: \(snapshot.calendarTitle)
+            icon: \(snapshot.icon ?? "nil")
+            colorHex: \(snapshot.colorHex)
+            start: \(snapshot.start)
+            end: \(snapshot.end)
+            isAllDay: \(snapshot.isAllDay)
+            """)
+        }
+        #endif
+    }
+
+    private static func debugExternalEventSnapshotLoad(_ snapshots: [LureliaWidgetExternalEventSnapshot]) {
+        #if DEBUG
+        print("[LureliaEventDebug] WIDGET RECEIVED EXTERNAL EVENT SNAPSHOTS count: \(snapshots.count)")
+        for snapshot in snapshots {
+            print("""
+            [LureliaEventDebug] WIDGET RECEIVED EXTERNAL EVENT
+            title: \(snapshot.title)
+            appleEventIdentifier: \(snapshot.appleEventIdentifier)
+            appleSeriesIdentifier: \(snapshot.appleSeriesIdentifier ?? "nil")
+            appleOccurrenceKey: \(snapshot.appleOccurrenceKey ?? "nil")
+            calendarIdentifier: \(snapshot.calendarIdentifier)
+            calendarTitle: \(snapshot.calendarTitle)
+            icon: \(snapshot.icon ?? "nil")
+            colorHex: \(snapshot.colorHex)
+            start: \(snapshot.start)
+            end: \(snapshot.end)
+            isAllDay: \(snapshot.isAllDay)
+            """)
+        }
+        #endif
     }
 
     static var appGroupContainerURL: URL {

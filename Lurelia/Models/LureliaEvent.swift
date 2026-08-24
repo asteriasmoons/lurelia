@@ -31,6 +31,10 @@ final class LureliaEvent {
     var longitude: Double?
     var notes: String?
     var appleEventIdentifier: String?
+    /// Stable EventKit calendar item identifier used to group occurrences
+    /// that belong to the same Apple recurring series. This is intentionally
+    /// separate from `appleOccurrenceKey`, which remains occurrence-specific.
+    var appleSeriesIdentifier: String?
     /// Stable Lurelia-side key for an imported Apple event shadow. For
     /// one-off Apple events this is based on the EventKit event identifier.
     /// For recurring Apple occurrences this also includes the occurrence's
@@ -130,6 +134,10 @@ struct LureliaEventOccurrence: Identifiable, Hashable {
     let end: Date
     let isAllDay: Bool
     let isAppleCalendarEvent: Bool
+    let appleCalendarIdentifier: String?
+    let appleCalendarTitle: String?
+    let appleSeriesIdentifier: String?
+    let appleOccurrenceKey: String?
 
     var id: String {
         "\(eventID.uuidString)-\(start.timeIntervalSince1970)-\(end.timeIntervalSince1970)-\(isAppleCalendarEvent)"
@@ -238,10 +246,11 @@ extension LureliaEvent {
 
     private var inferredEventOrigin: LureliaEventOrigin {
         let appleIdentifier = appleEventIdentifier?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        let appleSeriesID = appleSeriesIdentifier?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
         let appleCalendarID = appleCalendarIdentifier?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
         let occurrenceKey = appleOccurrenceKey?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
 
-        guard !appleIdentifier.isEmpty || !appleCalendarID.isEmpty || !occurrenceKey.isEmpty else {
+        guard !appleIdentifier.isEmpty || !appleSeriesID.isEmpty || !appleCalendarID.isEmpty || !occurrenceKey.isEmpty else {
             return .nativeLurelia
         }
 
@@ -305,7 +314,7 @@ extension LureliaEvent {
             return key
         }
 
-        guard let identifier = appleEventIdentifier?.trimmingCharacters(in: .whitespacesAndNewlines),
+        guard let identifier = resolvedAppleSeriesIdentifier,
               !identifier.isEmpty
         else {
             return nil
@@ -319,21 +328,78 @@ extension LureliaEvent {
         )
     }
 
+    var resolvedAppleSeriesIdentifier: String? {
+        let seriesIdentifier = appleSeriesIdentifier?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        if !seriesIdentifier.isEmpty {
+            return seriesIdentifier
+        }
+
+        let eventIdentifier = appleEventIdentifier?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        return eventIdentifier.isEmpty ? nil : eventIdentifier
+    }
+
     /// Preferred display color:
     /// - Lurelia-authored events use their Lurelia primary calendar color.
     /// - Apple-imported shadow events use their source Apple calendar color.
     /// - Older/unassigned rows fall back to the event's own stored color.
     var displayColorHex: String {
+        let appleColor = appleCalendarColor?.trimmingCharacters(in: .whitespacesAndNewlines)
+        let lureliaColor = calendar?.color.trimmingCharacters(in: .whitespacesAndNewlines)
+        let resolvedColor: String
+        let reason: String
+
         if isAppleImportedShadow,
-           let appleColor = appleCalendarColor?.trimmingCharacters(in: .whitespacesAndNewlines),
+           let appleColor,
            !appleColor.isEmpty {
-            return appleColor
+            resolvedColor = appleColor
+            reason = "appleImportedShadow.appleCalendarColor"
+        } else if let calendarColor = lureliaColor,
+                  !calendarColor.isEmpty {
+            resolvedColor = calendarColor
+            reason = "lureliaPrimaryCalendar.color"
+        } else {
+            resolvedColor = colorHex
+            reason = "event.colorHex"
         }
-        if let calendarColor = calendar?.color.trimmingCharacters(in: .whitespacesAndNewlines),
-           !calendarColor.isEmpty {
-            return calendarColor
-        }
-        return colorHex
+
+        debugDisplayColorResolution(
+            resolvedColor: resolvedColor,
+            reason: reason,
+            appleColor: appleColor,
+            lureliaColor: lureliaColor
+        )
+        return resolvedColor
+    }
+
+    private func debugDisplayColorResolution(
+        resolvedColor: String,
+        reason: String,
+        appleColor: String?,
+        lureliaColor: String?
+    ) {
+        #if DEBUG
+        print("""
+        [LureliaEventDebug] DISPLAY COLOR RESOLUTION
+        id: \(id.uuidString)
+        title: \(title)
+        originRaw: \(eventOriginRaw ?? "nil")
+        resolvedOrigin: \(eventOrigin.rawValue)
+        isAppleImportedShadow: \(isAppleImportedShadow)
+        appleEventIdentifier: \(appleEventIdentifier ?? "nil")
+        appleSeriesIdentifier: \(appleSeriesIdentifier ?? "nil")
+        appleOccurrenceKey: \(appleOccurrenceKey ?? "nil")
+        appleCalendarID: \(appleCalendarIdentifier ?? "nil")
+        appleCalendarTitle: \(appleCalendarTitle ?? "nil")
+        appleCalendarColor: \(appleColor ?? "nil")
+        lureliaCalendar: \(calendar?.name ?? "nil")
+        lureliaCalendarID: \(calendar?.id.uuidString ?? "nil")
+        lureliaCalendarColor: \(lureliaColor ?? "nil")
+        eventColor: \(colorHex)
+        resolvedColor: \(resolvedColor)
+        reason: \(reason)
+        icon: \(displayIcon)
+        """)
+        #endif
     }
 
     func occurrenceStart(on day: Date? = nil, calendar: Calendar = .current) -> Date {
@@ -372,9 +438,8 @@ extension LureliaEvent {
 
         let start = occurrenceStart(calendar: calendar)
         let end = occurrenceEnd(for: start, calendar: calendar)
-        let eventInterval = DateInterval(start: start, end: max(end, start.addingTimeInterval(60)))
 
-        guard eventInterval.intersects(interval) else { return [] }
+        guard eventIntersects(start: start, end: end, interval: interval) else { return [] }
         return [makeOccurrence(start: start, end: end)]
     }
 
@@ -405,8 +470,7 @@ extension LureliaEvent {
                 if !excluded.contains(calendar.startOfDay(for: candidateDay)) {
                     let start = occurrenceStart(on: candidateDay, calendar: calendar)
                     let end = occurrenceEnd(for: start, calendar: calendar)
-                    let eventInterval = DateInterval(start: start, end: max(end, start.addingTimeInterval(60)))
-                    if eventInterval.intersects(interval) {
+                    if eventIntersects(start: start, end: end, interval: interval) {
                         occurrences.append(makeOccurrence(start: start, end: end))
                     }
                 }
@@ -417,6 +481,11 @@ extension LureliaEvent {
         }
 
         return occurrences
+    }
+
+    private func eventIntersects(start: Date, end: Date, interval: DateInterval) -> Bool {
+        let eventEnd = max(end, start.addingTimeInterval(60))
+        return start < interval.end && eventEnd > interval.start
     }
 
     private func shouldStopRecurrence(
@@ -507,7 +576,11 @@ extension LureliaEvent {
             start: start,
             end: end,
             isAllDay: isAllDay,
-            isAppleCalendarEvent: isAppleImportedShadow
+            isAppleCalendarEvent: isAppleImportedShadow,
+            appleCalendarIdentifier: appleCalendarIdentifier,
+            appleCalendarTitle: appleCalendarTitle,
+            appleSeriesIdentifier: resolvedAppleSeriesIdentifier,
+            appleOccurrenceKey: resolvedAppleOccurrenceKey
         )
     }
 }
@@ -540,15 +613,20 @@ extension LureliaEvent {
     static func appleShadowCandidates(
         in events: [LureliaEvent],
         appleEventIdentifier: String,
+        appleSeriesIdentifier: String? = nil,
         appleOccurrenceKey: String
     ) -> [LureliaEvent] {
         let identifier = appleEventIdentifier.trimmingCharacters(in: .whitespacesAndNewlines)
+        let seriesIdentifier = appleSeriesIdentifier?.trimmingCharacters(in: .whitespacesAndNewlines) ?? identifier
         let key = appleOccurrenceKey.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !identifier.isEmpty, !key.isEmpty else { return [] }
 
         let exactMatches = events.filter {
             $0.isAppleImportedShadow &&
-            ($0.appleOccurrenceKey ?? "").trimmingCharacters(in: .whitespacesAndNewlines) == key
+            (
+                ($0.appleOccurrenceKey ?? "").trimmingCharacters(in: .whitespacesAndNewlines) == key ||
+                $0.resolvedAppleOccurrenceKey == key
+            )
         }
         if !exactMatches.isEmpty {
             return exactMatches
@@ -560,19 +638,26 @@ extension LureliaEvent {
         return events.filter {
             guard $0.isAppleImportedShadow else { return false }
             let storedIdentifier = ($0.appleEventIdentifier ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+            let storedSeriesIdentifier = $0.resolvedAppleSeriesIdentifier ?? ""
             let storedKey = ($0.appleOccurrenceKey ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
-            return storedIdentifier == identifier && storedKey.isEmpty
+            return storedKey.isEmpty &&
+                (
+                    storedIdentifier == identifier ||
+                    (!seriesIdentifier.isEmpty && storedSeriesIdentifier == seriesIdentifier)
+                )
         }
     }
 
     static func preferredAppleShadow(
         in events: [LureliaEvent],
         appleEventIdentifier: String,
+        appleSeriesIdentifier: String? = nil,
         appleOccurrenceKey: String
     ) -> LureliaEvent? {
         appleShadowCandidates(
             in: events,
             appleEventIdentifier: appleEventIdentifier,
+            appleSeriesIdentifier: appleSeriesIdentifier,
             appleOccurrenceKey: appleOccurrenceKey
         )
         .sorted { left, right in

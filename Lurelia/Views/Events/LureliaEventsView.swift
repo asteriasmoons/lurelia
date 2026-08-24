@@ -205,17 +205,115 @@ struct LureliaEventsView: View {
 
     private var visibleExternalOccurrences: [LureliaExternalCalendarOccurrence] {
         guard settings.first?.showAppleCalendarEvents ?? true else { return [] }
-        let importedAppleOccurrenceKeys = Set(events.compactMap(\.resolvedAppleOccurrenceKey))
+        let appleShadows = events.filter(\.isAppleImportedShadow)
+        let importedAppleOccurrenceKeys = Set(appleShadows.compactMap(\.resolvedAppleOccurrenceKey))
+        let importedAppleOccurrenceSignatures = Set(
+            appleShadows.flatMap { appleOccurrenceSignatures(for: $0) }
+        )
         let mirroredRecurringAppleIDs = Set(
             events
                 .filter { $0.recurrence != nil }
-                .compactMap { $0.appleEventIdentifier?.trimmingCharacters(in: .whitespacesAndNewlines) }
+                .compactMap(\.resolvedAppleSeriesIdentifier)
                 .filter { !$0.isEmpty }
         )
-        return externalOccurrences.filter {
-            !importedAppleOccurrenceKeys.contains($0.appleOccurrenceKey) &&
-            !mirroredRecurringAppleIDs.contains($0.appleEventIdentifier)
+        return externalOccurrences.filter { occurrence in
+            let occurrenceKey = occurrence.appleOccurrenceKey
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+            let occurrenceSignatures = appleOccurrenceSignatures(for: occurrence)
+
+            return !importedAppleOccurrenceKeys.contains(occurrenceKey) &&
+                !mirroredRecurringAppleIDs.contains(occurrence.appleSeriesIdentifier) &&
+                occurrenceSignatures.isDisjoint(with: importedAppleOccurrenceSignatures)
         }
+    }
+
+    private struct AppleOccurrenceSignature: Hashable {
+        let source: String
+        let start: Int
+        let end: Int
+    }
+
+    private func appleOccurrenceSignatures(for event: LureliaEvent) -> [AppleOccurrenceSignature] {
+        let start = normalizedOccurrenceTime(event.startDate)
+        let end = normalizedOccurrenceTime(event.endDate ?? event.startDate.addingTimeInterval(max(0, event.duration)))
+        var signatures: [AppleOccurrenceSignature] = []
+
+        if let seriesIdentifier = event.resolvedAppleSeriesIdentifier?
+            .trimmingCharacters(in: .whitespacesAndNewlines),
+           !seriesIdentifier.isEmpty {
+            signatures.append(
+                AppleOccurrenceSignature(
+                    source: "series:\(seriesIdentifier)",
+                    start: start,
+                    end: end
+                )
+            )
+        }
+
+        if let calendarIdentifier = event.appleCalendarIdentifier?
+            .trimmingCharacters(in: .whitespacesAndNewlines),
+           !calendarIdentifier.isEmpty {
+            signatures.append(
+                AppleOccurrenceSignature(
+                    source: legacyAppleOccurrenceSource(
+                        calendarIdentifier: calendarIdentifier,
+                        title: event.title
+                    ),
+                    start: start,
+                    end: end
+                )
+            )
+        }
+
+        return signatures
+    }
+
+    private func appleOccurrenceSignatures(
+        for occurrence: LureliaExternalCalendarOccurrence
+    ) -> Set<AppleOccurrenceSignature> {
+        let start = normalizedOccurrenceTime(occurrence.start)
+        let end = normalizedOccurrenceTime(occurrence.end)
+        var signatures = Set<AppleOccurrenceSignature>()
+
+        let seriesIdentifier = occurrence.appleSeriesIdentifier
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        if !seriesIdentifier.isEmpty {
+            signatures.insert(
+                AppleOccurrenceSignature(
+                    source: "series:\(seriesIdentifier)",
+                    start: start,
+                    end: end
+                )
+            )
+        }
+
+        let calendarIdentifier = occurrence.calendarIdentifier
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        if !calendarIdentifier.isEmpty {
+            signatures.insert(
+                AppleOccurrenceSignature(
+                    source: legacyAppleOccurrenceSource(
+                        calendarIdentifier: calendarIdentifier,
+                        title: occurrence.title
+                    ),
+                    start: start,
+                    end: end
+                )
+            )
+        }
+
+        return signatures
+    }
+
+    private func legacyAppleOccurrenceSource(calendarIdentifier: String, title: String) -> String {
+        let cleanTitle = title
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .folding(options: [.caseInsensitive, .diacriticInsensitive], locale: .current)
+        return "legacy:\(calendarIdentifier):\(cleanTitle)"
+    }
+
+    private func normalizedOccurrenceTime(_ date: Date) -> Int {
+        Int(date.timeIntervalSince1970.rounded())
     }
 
     private var header: some View {
@@ -420,24 +518,65 @@ struct LureliaEventsView: View {
             to: displayInterval.end,
             calendarIdentifiers: selectedAppleCalendarIDs
         )
-        externalOccurrences = fetchedExternalOccurrences
-        let widgetSnapshots = fetchedExternalOccurrences.map {
+        let resolvedExternalOccurrences = fetchedExternalOccurrences.map { occurrence in
+            occurrence.withIcon(iconForExternalOccurrence(occurrence))
+        }
+        externalOccurrences = resolvedExternalOccurrences
+        debugExternalOccurrencesForWidgetExport(resolvedExternalOccurrences)
+        let widgetSnapshots = resolvedExternalOccurrences.map {
             LureliaWidgetExternalEventSnapshot(
                 id: $0.id,
                 appleEventIdentifier: $0.appleEventIdentifier,
+                appleSeriesIdentifier: $0.appleSeriesIdentifier,
                 appleOccurrenceKey: $0.appleOccurrenceKey,
                 calendarIdentifier: $0.calendarIdentifier,
                 calendarTitle: $0.calendarTitle,
                 title: $0.title,
+                icon: $0.icon,
                 colorHex: $0.colorHex,
                 start: $0.start,
                 end: $0.end,
                 isAllDay: $0.isAllDay
             )
         }
+        debugWidgetSnapshotExport(widgetSnapshots)
         if LureliaWidgetShared.saveExternalEventSnapshots(widgetSnapshots) {
             LureliaWidgetReloads.reloadAll()
         }
+    }
+
+    private func iconForExternalOccurrence(_ occurrence: LureliaExternalCalendarOccurrence) -> String? {
+        let occurrenceKey = occurrence.appleOccurrenceKey
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        let appleSeriesIdentifier = occurrence.appleSeriesIdentifier
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+
+        let exactIcon = events.first { event in
+            event.isAppleImportedShadow &&
+            !occurrenceKey.isEmpty &&
+            event.resolvedAppleOccurrenceKey == occurrenceKey
+        }?
+        .displayIcon
+        .trimmingCharacters(in: .whitespacesAndNewlines)
+
+        let seriesIcon = events
+            .filter { event in
+                event.isAppleImportedShadow &&
+                !appleSeriesIdentifier.isEmpty &&
+                event.resolvedAppleSeriesIdentifier == appleSeriesIdentifier
+            }
+            .sorted { $0.modifiedDate > $1.modifiedDate }
+            .first { event in
+                let icon = event.displayIcon.trimmingCharacters(in: .whitespacesAndNewlines)
+                return !icon.isEmpty && icon != "starcal"
+            }?
+            .displayIcon
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+
+        let icon = exactIcon != nil && exactIcon != "starcal"
+            ? exactIcon!
+            : (seriesIcon ?? exactIcon ?? "")
+        return icon.isEmpty ? nil : icon
     }
 
     private func migrateEventOriginsIfNeeded() {
@@ -449,5 +588,50 @@ struct LureliaEventsView: View {
         if didChange {
             try? modelContext.save()
         }
+    }
+
+    private func debugExternalOccurrencesForWidgetExport(_ occurrences: [LureliaExternalCalendarOccurrence]) {
+        #if DEBUG
+        print("[LureliaEventDebug] EXTERNAL OCCURRENCES BEFORE WIDGET SNAPSHOT count: \(occurrences.count)")
+        for occurrence in occurrences {
+            print("""
+            [LureliaEventDebug] EXTERNAL OCCURRENCE FOR SNAPSHOT
+            title: \(occurrence.title)
+            appleEventIdentifier: \(occurrence.appleEventIdentifier)
+            appleSeriesIdentifier: \(occurrence.appleSeriesIdentifier)
+            appleOccurrenceKey: \(occurrence.appleOccurrenceKey)
+            appleCalendarID: \(occurrence.calendarIdentifier)
+            appleCalendarTitle: \(occurrence.calendarTitle)
+            appleCalendarColor: \(occurrence.colorHex)
+            start: \(occurrence.start)
+            end: \(occurrence.end)
+            isAllDay: \(occurrence.isAllDay)
+            isRecurring: \(occurrence.isRecurring)
+            icon: \(occurrence.icon ?? "nil")
+            """)
+        }
+        #endif
+    }
+
+    private func debugWidgetSnapshotExport(_ snapshots: [LureliaWidgetExternalEventSnapshot]) {
+        #if DEBUG
+        print("[LureliaEventDebug] WIDGET SNAPSHOT EXPORT count: \(snapshots.count)")
+        for snapshot in snapshots {
+            print("""
+            [LureliaEventDebug] WIDGET SNAPSHOT EXPORT ITEM
+            title: \(snapshot.title)
+            appleEventIdentifier: \(snapshot.appleEventIdentifier)
+            appleSeriesIdentifier: \(snapshot.appleSeriesIdentifier)
+            appleOccurrenceKey: \(snapshot.appleOccurrenceKey ?? "nil")
+            calendarIdentifier: \(snapshot.calendarIdentifier)
+            calendarTitle: \(snapshot.calendarTitle)
+            icon: \(snapshot.icon ?? "nil")
+            colorHex: \(snapshot.colorHex)
+            start: \(snapshot.start)
+            end: \(snapshot.end)
+            isAllDay: \(snapshot.isAllDay)
+            """)
+        }
+        #endif
     }
 }

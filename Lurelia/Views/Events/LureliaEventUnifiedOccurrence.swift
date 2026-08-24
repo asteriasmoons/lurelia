@@ -26,7 +26,9 @@ enum LureliaEventUnifiedOccurrence: Identifiable {
     var icon: String {
         switch self {
         case .local(let occurrence): return occurrence.icon
-        case .apple: return "starcal"
+        case .apple(let occurrence):
+            let icon = occurrence.icon?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+            return icon.isEmpty ? "starcal" : icon
         }
     }
 
@@ -74,6 +76,13 @@ enum LureliaEventUnifiedOccurrence: Identifiable {
         }
     }
 
+    var isAppleOwned: Bool {
+        switch self {
+        case .local(let occurrence): return occurrence.isAppleCalendarEvent
+        case .apple: return true
+        }
+    }
+
     var isAllDay: Bool {
         switch self {
         case .local(let occurrence): return occurrence.isAllDay
@@ -103,5 +112,162 @@ enum LureliaEventUnifiedOccurrence: Identifiable {
         case .local: return nil
         case .apple(let occurrence): return occurrence
         }
+    }
+
+    func occurs(on day: Date, calendar: Calendar = .current) -> Bool {
+        let dayStart = calendar.startOfDay(for: day)
+
+        if isAllDay {
+            let startDay = calendar.startOfDay(for: start)
+            let endDay = calendar.startOfDay(for: end)
+
+            if endDay <= startDay {
+                return calendar.isDate(startDay, inSameDayAs: dayStart)
+            }
+
+            // Apple all-day event ends are exclusive. An event ending exactly
+            // at today's midnight belongs to yesterday, not today.
+            return dayStart >= startDay && dayStart < endDay
+        }
+
+        guard let dayInterval = calendar.dateInterval(of: .day, for: day) else {
+            return calendar.isDate(start, inSameDayAs: day)
+        }
+
+        let eventEnd = max(end, start.addingTimeInterval(60))
+        return start < dayInterval.end && eventEnd > dayInterval.start
+    }
+
+    static func deduplicated(_ rows: [LureliaEventUnifiedOccurrence]) -> [LureliaEventUnifiedOccurrence] {
+        var seen = Set<AppleDedupKey>()
+        var result: [LureliaEventUnifiedOccurrence] = []
+
+        for row in rows {
+            let keys = row.appleDedupKeys
+            if keys.isEmpty || keys.isDisjoint(with: seen) {
+                result.append(row)
+                seen.formUnion(keys)
+            }
+        }
+
+        return result
+    }
+
+    private struct AppleDedupKey: Hashable {
+        let source: String
+        let title: String?
+        let start: Int
+        let end: Int
+        let isAllDay: Bool
+    }
+
+    private var appleDedupKeys: Set<AppleDedupKey> {
+        guard isAppleOwned else { return [] }
+
+        let titleKey = normalizedAppleTitle(title)
+        let startKey = normalizedAppleTime(start)
+        let endKey = normalizedAppleTime(end)
+        var keys = Set<AppleDedupKey>()
+
+        switch self {
+        case .local(let occurrence):
+            if let occurrenceKey = occurrence.appleOccurrenceKey?.trimmedNonEmptyForEventDedup {
+                keys.insert(
+                    AppleDedupKey(
+                        source: "occurrence:\(occurrenceKey)",
+                        title: nil,
+                        start: startKey,
+                        end: endKey,
+                        isAllDay: occurrence.isAllDay
+                    )
+                )
+            }
+
+            if let seriesIdentifier = occurrence.appleSeriesIdentifier?.trimmedNonEmptyForEventDedup {
+                keys.insert(
+                    AppleDedupKey(
+                        source: "series:\(seriesIdentifier)",
+                        title: nil,
+                        start: startKey,
+                        end: endKey,
+                        isAllDay: occurrence.isAllDay
+                    )
+                )
+            }
+
+            if let calendarIdentifier = occurrence.appleCalendarIdentifier?.trimmedNonEmptyForEventDedup {
+                keys.insert(
+                    AppleDedupKey(
+                        source: "calendar:\(calendarIdentifier)",
+                        title: titleKey,
+                        start: startKey,
+                        end: endKey,
+                        isAllDay: occurrence.isAllDay
+                    )
+                )
+            }
+
+        case .apple(let occurrence):
+            let occurrenceKey = occurrence.appleOccurrenceKey
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+            if !occurrenceKey.isEmpty {
+                keys.insert(
+                    AppleDedupKey(
+                        source: "occurrence:\(occurrenceKey)",
+                        title: nil,
+                        start: startKey,
+                        end: endKey,
+                        isAllDay: occurrence.isAllDay
+                    )
+                )
+            }
+
+            let seriesIdentifier = occurrence.appleSeriesIdentifier
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+            if !seriesIdentifier.isEmpty {
+                keys.insert(
+                    AppleDedupKey(
+                        source: "series:\(seriesIdentifier)",
+                        title: nil,
+                        start: startKey,
+                        end: endKey,
+                        isAllDay: occurrence.isAllDay
+                    )
+                )
+            }
+
+            let calendarIdentifier = occurrence.calendarIdentifier
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+            if !calendarIdentifier.isEmpty {
+                keys.insert(
+                    AppleDedupKey(
+                        source: "calendar:\(calendarIdentifier)",
+                        title: titleKey,
+                        start: startKey,
+                        end: endKey,
+                        isAllDay: occurrence.isAllDay
+                    )
+                )
+            }
+        }
+
+        return keys
+    }
+
+    private func normalizedAppleTitle(_ value: String) -> String {
+        value
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .folding(options: [.caseInsensitive, .diacriticInsensitive], locale: .current)
+    }
+
+    private func normalizedAppleTime(_ date: Date) -> Int {
+        Int(date.timeIntervalSince1970.rounded())
+    }
+}
+
+private extension String {
+    var trimmedNonEmptyForEventDedup: String? {
+        let trimmed = trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.isEmpty ? nil : trimmed
     }
 }

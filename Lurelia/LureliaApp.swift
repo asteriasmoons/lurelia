@@ -46,15 +46,6 @@ struct LureliaApp: App {
                     HabitManager.shared.setup(container: sharedModelContainer)
                     RoutineManager.shared.resetRoutinesIfNewDay(context: sharedModelContainer.mainContext)
                     scheduleRoutineMidnightReset()
-                    
-                    // DISABLED: this deleted EVERY routine on every app launch
-                    // (part of the old "routines permanently disabled" work).
-                    // Commented out — kept for reference — now that Routines
-                    // are active again.
-                    //
-                    // await RoutineManager.shared.deleteAndStopAllRoutinesForever(
-                    //     context: sharedModelContainer.mainContext
-                    // )
 
 
                     print("🧪 LureliaApp directly triggering notification reschedule")
@@ -1892,6 +1883,7 @@ struct LureliaApp: App {
         let reminders = (try? context.fetch(FetchDescriptor<LureliaReminder>())) ?? []
         let habits = (try? context.fetch(FetchDescriptor<LureliaHabit>())) ?? []
         let routines = (try? context.fetch(FetchDescriptor<LureliaRoutine>())) ?? []
+        let events = (try? context.fetch(FetchDescriptor<LureliaEvent>())) ?? []
 
         var iconNames = Set(reminders.map { reminder in
             let trimmed = reminder.icon.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -1918,6 +1910,13 @@ struct LureliaApp: App {
             }
         }
 
+        for event in events {
+            let eventIcon = event.displayIcon.trimmingCharacters(in: .whitespacesAndNewlines)
+            if !eventIcon.isEmpty {
+                iconNames.insert(eventIcon)
+            }
+        }
+
         iconNames.insert("bellfill")
         iconNames.insert("skipwavy")
         iconNames.insert("checkwavy")
@@ -1929,6 +1928,11 @@ struct LureliaApp: App {
         // without an explicit export the widget's title icon renders
         // blank (LureliaWidgetShared.widgetIcon(for:) returns nil).
         iconNames.insert("ringstarcal")
+        iconNames.insert("starcal")
+
+        #if DEBUG
+        debugEventIconsForWidgetExport(events, exportedIconNames: iconNames)
+        #endif
 
         let fileManager = FileManager.default
         let iconDirectory = LureliaWidgetShared.appGroupContainerURL.appendingPathComponent("widget_icons", isDirectory: true)
@@ -1950,6 +1954,7 @@ struct LureliaApp: App {
             let destinationURL = iconDirectory.appendingPathComponent("\(iconName).png")
 
             guard let sourceImage = UIImage(named: iconName) else {
+                debugWidgetIconExport(iconName: iconName, result: "missing-source-asset")
                 continue
             }
 
@@ -1974,9 +1979,27 @@ struct LureliaApp: App {
 
             do {
                 try pngData.write(to: destinationURL, options: .atomic)
+                debugWidgetIconExport(iconName: iconName, result: "exported")
             } catch {
                 print("[Lurelia] Failed to export widget icon \(iconName): \(error)")
             }
         }
+    }
+
+    private func debugEventIconsForWidgetExport(_ events: [LureliaEvent], exportedIconNames: Set<String>) {
+        #if DEBUG
+        print("[LureliaEventDebug] WIDGET ICON EXPORT EVENT SCAN count: \(events.count)")
+        for event in events {
+            let icon = event.displayIcon.trimmingCharacters(in: .whitespacesAndNewlines)
+            let action = icon.isEmpty ? "empty-icon-skipped" : (exportedIconNames.contains(icon) ? "queued-for-export" : "not-queued")
+            print("[LureliaEventDebug] WIDGET ICON EXPORT EVENT id=\(event.id.uuidString) title=\(event.title) icon=\(icon) origin=\(event.eventOrigin.rawValue) appleEventIdentifier=\(event.appleEventIdentifier ?? "nil") appleSeriesIdentifier=\(event.appleSeriesIdentifier ?? "nil") appleOccurrenceKey=\(event.appleOccurrenceKey ?? "nil") appleCalendarID=\(event.appleCalendarIdentifier ?? "nil") appleCalendarColor=\(event.appleCalendarColor ?? "nil") lureliaCalendar=\(event.calendar?.name ?? "nil") lureliaCalendarColor=\(event.calendar?.color ?? "nil") exporterAction=\(action)")
+        }
+        #endif
+    }
+
+    private func debugWidgetIconExport(iconName: String, result: String) {
+        #if DEBUG
+        print("[LureliaEventDebug] WIDGET ICON EXPORT RESULT iconName=\(iconName) result=\(result)")
+        #endif
     }
 }
