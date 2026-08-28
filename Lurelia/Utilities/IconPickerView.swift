@@ -15,10 +15,11 @@ struct IconPickerView: View {
     var onSelection: ((String) -> Void)?
 
     @Environment(\.dismiss) private var dismiss
-    
+
     @State private var searchText = ""
     @State private var selectedCategory = ""
-    
+    @State private var categoryDropdownExpanded = false
+
     private var isSearching: Bool {
         !searchText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
     }
@@ -53,7 +54,7 @@ struct IconPickerView: View {
 
                     return $0.name < $1.name
                 }
-                .prefix(180)
+                .prefix(300)
         )
     }
 
@@ -64,23 +65,23 @@ struct IconPickerView: View {
 
         return "\(visibleIcons.count) icon\(visibleIcons.count == 1 ? "" : "s")"
     }
-    
+
     var body: some View {
         NavigationStack {
             ZStack {
                 LureliaBackgroundAlt()
-                
+
                 ScrollView(showsIndicators: false) {
                     LazyVStack(alignment: .leading, spacing: 18, pinnedViews: []) {
                         searchField
 
                         if !isSearching {
-                            categoryTabs
+                            categoryDropdown
                         }
 
                         HStack {
                             Text(isSearching ? "Search Results" : activeCategory)
-                                .font(.system(size: 13, weight: .bold, design: .rounded))
+                                .font(.system(size: 13, weight: .black, design: .rounded))
                                 .foregroundStyle(LColors.textSecondary)
 
                             Spacer()
@@ -137,65 +138,139 @@ struct IconPickerView: View {
             }
         }
     }
-    
+
+    // MARK: - Search Field
+
     private var searchField: some View {
         GlassCard {
-            HStack(spacing: 10) {
-                Image(systemName: "magnifyingglass")
-                    .font(.system(size: 14, weight: .semibold))
+            HStack(spacing: 8) {
+                Image("searchwavy")
+                    .renderingMode(.template)
+                    .resizable()
+                    .scaledToFit()
+                    .frame(width: 18, height: 18)
                     .foregroundStyle(LColors.textSecondary.opacity(0.7))
-                
+
                 TextField("Search icons", text: $searchText)
-                    .font(.system(size: 14, design: .rounded))
+                    .font(.system(size: 12, design: .rounded))
                     .foregroundStyle(LColors.textPrimary)
             }
-            .padding(.horizontal, 14)
-            .padding(.vertical, 12)
+            .padding(.horizontal, 10)
+            .padding(.vertical, 4)
         }
     }
 
-    private var categoryTabs: some View {
-        LureliaFlowLayout(spacing: 8, lineSpacing: 8) {
-            ForEach(categories, id: \.self) { category in
-                Button {
-                    withAnimation(.spring(response: 0.24, dampingFraction: 0.82)) {
-                        selectedCategory = category
-                    }
-                } label: {
-                    Text(category)
-                        .font(.system(size: 12, weight: .bold, design: .rounded))
-                        .foregroundStyle(category == activeCategory ? .white : LColors.textSecondary)
-                        .lineLimit(1)
-                        .padding(.horizontal, 12)
-                        .frame(height: 34)
-                        .background(
-                            category == activeCategory
-                            ? AnyShapeStyle(LGradients.header)
-                            : AnyShapeStyle(LColors.glassSurface),
-                            in: Capsule()
-                        )
-                        .overlay {
-                            Capsule()
-                                .strokeBorder(
-                                    category == activeCategory ? LColors.glassBorderStrong : LColors.glassBorder,
-                                    lineWidth: 1
-                                )
-                        }
+    // MARK: - Custom Collapsible Category Dropdown
+
+    private var categoryDropdown: some View {
+        VStack(spacing: 0) {
+            Button {
+                withAnimation(.spring(response: 0.28, dampingFraction: 0.86)) {
+                    categoryDropdownExpanded.toggle()
                 }
-                .buttonStyle(.plain)
+            } label: {
+                HStack(spacing: 12) {
+                    VStack(alignment: .leading, spacing: 3) {
+                        Text("CATEGORY")
+                            .font(.system(size: 10, weight: .black, design: .rounded))
+                            .foregroundStyle(LColors.textSecondary.opacity(0.6))
+
+                        Text(activeCategory.isEmpty ? "All" : activeCategory)
+                            .font(.system(size: 15, weight: .black, design: .rounded))
+                            .foregroundStyle(LColors.textPrimary)
+                    }
+
+                    Spacer()
+
+                    Image(categoryDropdownExpanded ? "chevup" : "chevdown")
+                        .renderingMode(.template)
+                        .resizable()
+                        .scaledToFit()
+                        .frame(width: 14, height: 14)
+                        .foregroundStyle(LColors.textPrimary)
+                }
+                .padding(.horizontal, 14)
+                .padding(.vertical, 14)
+                .background(LColors.glassSurface, in: RoundedRectangle(cornerRadius: LSpacing.cardRadius, style: .continuous))
+                .overlay(
+                    RoundedRectangle(cornerRadius: LSpacing.cardRadius, style: .continuous)
+                        .strokeBorder(LColors.glassBorder, lineWidth: 1)
+                )
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+
+            if categoryDropdownExpanded {
+                categoryDropdownList
+                    .padding(.top, 8)
+                    .transition(.opacity.combined(with: .move(edge: .top)))
             }
         }
     }
-    
+
+    private var categoryDropdownList: some View {
+        ScrollView(.vertical, showsIndicators: true) {
+            VStack(spacing: 6) {
+                ForEach(categories, id: \.self) { category in
+                    let isActive = category == activeCategory
+
+                    HStack(spacing: 10) {
+                        Text(category)
+                            .font(.system(size: 14, weight: isActive ? .black : .bold, design: .rounded))
+                            .foregroundStyle(isActive ? LColors.textPrimary : LColors.textSecondary)
+                            .lineLimit(1)
+
+                        Spacer()
+
+                        if isActive {
+                            Image("checkwavy")
+                                .renderingMode(.template)
+                                .resizable()
+                                .scaledToFit()
+                                .frame(width: 14, height: 14)
+                                .foregroundStyle(LColors.textPrimary)
+                        }
+                    }
+                    .padding(.horizontal, 14)
+                    .padding(.vertical, 12)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .background(
+                        isActive ? LColors.glassSurface2 : LColors.glassSurface,
+                        in: RoundedRectangle(cornerRadius: LSpacing.inputRadius, style: .continuous)
+                    )
+                    .overlay(
+                        RoundedRectangle(cornerRadius: LSpacing.inputRadius, style: .continuous)
+                            .strokeBorder(
+                                isActive ? LColors.glassBorderStrong : LColors.glassBorder,
+                                lineWidth: 1
+                            )
+                    )
+                    .contentShape(Rectangle())
+                    .onTapGesture {
+                        withAnimation(.spring(response: 0.24, dampingFraction: 0.86)) {
+                            selectedCategory = category
+                            categoryDropdownExpanded = false
+                        }
+                    }
+                }
+            }
+            .padding(10)
+        }
+        .frame(maxHeight: 220)
+        .background(LColors.glassSurface, in: RoundedRectangle(cornerRadius: LSpacing.cardRadius, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: LSpacing.cardRadius, style: .continuous)
+                .strokeBorder(LColors.glassBorder, lineWidth: 1)
+        )
+    }
+
+    // MARK: - Icon Cell
+
     private func iconCell(_ icon: LureliaIconItem) -> some View {
         let isSelected = selectedIcon == icon.name
 
         return LureliaIconGlyph(icon: icon, size: 22)
-            .foregroundStyle(
-                isSelected
-                ? AnyShapeStyle(LGradients.header)
-                : AnyShapeStyle(LColors.textPrimary)
-            )
+            .foregroundStyle(LColors.textPrimary)
             .frame(width: 48, height: 48)
             .background(
                 isSelected ? LColors.glassSurface2 : LColors.glassSurface,
@@ -279,28 +354,16 @@ private struct LureliaIconGlyph: View {
             }
 
         case .sfSymbol:
-            if UIImage(systemName: icon.name) != nil {
-                Image(systemName: icon.name)
-                    .resizable()
-                    .scaledToFit()
-            } else {
-                fallbackIcon
-            }
+            // Legacy source kept for Codable compatibility with previously
+            // saved data — never used by the current library.
+            fallbackIcon
         }
     }
 }
 
 private var fallbackIcon: some View {
-    Group {
-        if UIImage(named: "sparkle") != nil {
-            Image("sparkle")
-                .renderingMode(.template)
-                .resizable()
-                .scaledToFit()
-        } else {
-        Image(systemName: "questionmark.circle.fill")
-            .resizable()
-            .scaledToFit()
-        }
-    }
+    Image("sparkle")
+        .renderingMode(.template)
+        .resizable()
+        .scaledToFit()
 }

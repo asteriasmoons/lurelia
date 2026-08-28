@@ -17,6 +17,7 @@ final class LureliaHabitLog {
 
     var dayStart: Date = Date()
     var count: Int = 1
+    var habitIDString: String = ""
 
     /// JSON-encoded `[String]` of "HH:mm" fire times the user has checked
     /// off for this day. Enables per-fire-time completion tracking on the
@@ -39,6 +40,7 @@ final class LureliaHabitLog {
     init(habit: LureliaHabit, dayStart: Date, count: Int = 1) {
         self.id = UUID()
         self.habit = habit
+        self.habitIDString = habit.id.uuidString
         self.dayStart = Calendar.current.startOfDay(for: dayStart)
         self.count = max(1, count)
         self.createdAt = Date()

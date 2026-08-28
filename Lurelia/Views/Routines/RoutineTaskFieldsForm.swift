@@ -11,6 +11,7 @@
 import SwiftUI
 import Combine
 import AVFoundation
+import UIKit
 
 // MARK: - Alarm Sound Preview Player
 
@@ -101,7 +102,9 @@ struct RoutineTaskFieldsForm: View {
     @Binding var triggerReason: String
     @Binding var environment: String
     @Binding var reward: String
+    @Binding var rewardEnabled: Bool
     @Binding var consequence: String
+    @Binding var consequenceEnabled: Bool
     @Binding var recoveryPlan: String
 
     @Binding var hasDueTime: Bool
@@ -150,6 +153,8 @@ struct RoutineTaskFieldsForm: View {
                 TextField("Task name", text: $title)
                     .font(.system(size: 15, weight: .bold, design: .rounded))
                     .foregroundStyle(textColor)
+                    .submitLabel(.done)
+                    .onSubmit { dismissKeyboard() }
             }
 
             fieldCard(title: "Description") {
@@ -157,6 +162,8 @@ struct RoutineTaskFieldsForm: View {
                     .lineLimit(2...5)
                     .font(.system(size: 14, weight: .medium, design: .rounded))
                     .foregroundStyle(textColor)
+                    .submitLabel(.done)
+                    .onSubmit { dismissKeyboard() }
             }
 
             contextFillSection
@@ -166,6 +173,11 @@ struct RoutineTaskFieldsForm: View {
             contentSection
             blueprintSection
         }
+        .background(
+            Color.clear
+                .contentShape(Rectangle())
+                .onTapGesture { dismissKeyboard() }
+        )
         .sheet(isPresented: $showIconPicker) {
             IconPickerView(selectedIcon: $selectedIcon)
         }
@@ -178,13 +190,13 @@ struct RoutineTaskFieldsForm: View {
 
     @ViewBuilder
     private var scheduleSection: some View {
-        groupHeader("Schedule", icon: "timebook")
+        groupHeader("Schedule", icon: "ringstarcal")
 
-        toggleCard(title: "Set a due time", subtitle: "Give this task its own time", isOn: $hasDueTime)
+        toggleCard(title: "Set a due time", subtitle: "Give this task its own time", isOn: $hasDueTime, icon: "ringstarcal")
 
         if hasDueTime {
             fieldCard(title: "Due Time") {
-                LureliaTintedTimeDrumPicker(hour: $dueHour, minute: $dueMinute, tint: accentColor)
+                LureliaTintedTimeDrumPicker(hour: $dueHour, minute: $dueMinute, tint: LColors.neutralSilver)
             }
         }
 
@@ -196,7 +208,7 @@ struct RoutineTaskFieldsForm: View {
             step: 1
         )
 
-        toggleCard(title: "Repeat on days", subtitle: "Choose which days this applies", isOn: $repeatsOnDays)
+        toggleCard(title: "Repeat on days", subtitle: "Choose which days this applies", isOn: $repeatsOnDays, icon: "repeatfill")
 
         if repeatsOnDays {
             weekdaySelector
@@ -210,7 +222,8 @@ struct RoutineTaskFieldsForm: View {
         toggleCard(
             title: "Notifications",
             subtitle: hasDueTime ? "Remind me before it's due" : "Requires a due time",
-            isOn: $notificationsEnabled
+            isOn: $notificationsEnabled,
+            icon: "bellfill"
         )
 
         if notificationsEnabled && hasDueTime {
@@ -220,10 +233,11 @@ struct RoutineTaskFieldsForm: View {
         toggleCard(
             title: "Alarm",
             subtitle: hasDueTime ? "Fire an alarm at the due time" : "Requires a due time",
-            isOn: $alarmEnabled
+            isOn: $alarmEnabled,
+            icon: "clockwavy"
         )
 
-        if alarmEnabled && hasDueTime {
+        if alarmEnabled {
             alarmSoundPicker
         }
     }
@@ -267,7 +281,7 @@ struct RoutineTaskFieldsForm: View {
                 .background(LColors.glassSurface, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
                 .overlay {
                     RoundedRectangle(cornerRadius: 16, style: .continuous)
-                        .strokeBorder(accent.opacity(0.35), lineWidth: 1)
+                        .strokeBorder(LColors.glassBorder, lineWidth: 1)
                 }
             }
             .buttonStyle(.plain)
@@ -367,8 +381,30 @@ struct RoutineTaskFieldsForm: View {
 
         groupHeader("Obstacles", icon: "crossroads")
         obstaclesEditor
-        multilineCard(title: "Reward", placeholder: "What do you get for completing this?", text: $reward)
-        multilineCard(title: "Consequence", placeholder: "What happens if this gets skipped?", text: $consequence)
+
+        toggleCard(
+            title: "Reward",
+            subtitle: rewardEnabled ? "Optional reward is attached" : "Optional reward",
+            isOn: $rewardEnabled,
+            icon: "starsparklesbox"
+        )
+
+        if rewardEnabled {
+            multilineCard(title: "Reward", placeholder: "What do you get for completing this?", text: $reward)
+                .transition(.opacity.combined(with: .move(edge: .top)))
+        }
+
+        toggleCard(
+            title: "Consequence",
+            subtitle: consequenceEnabled ? "Optional consequence is attached" : "Optional consequence",
+            isOn: $consequenceEnabled,
+            icon: "warnwavy"
+        )
+
+        if consequenceEnabled {
+            multilineCard(title: "Consequence", placeholder: "What happens if this gets skipped?", text: $consequence)
+                .transition(.opacity.combined(with: .move(edge: .top)))
+        }
     }
 
     private var contextFillSection: some View {
@@ -378,6 +414,8 @@ struct RoutineTaskFieldsForm: View {
                     .lineLimit(3...7)
                     .font(.system(size: 14, weight: .medium, design: .rounded))
                     .foregroundStyle(textColor)
+                    .submitLabel(.done)
+                    .onSubmit { dismissKeyboard() }
             }
 
             Button {
@@ -425,6 +463,15 @@ struct RoutineTaskFieldsForm: View {
 
     private var fillDetailsButtonTextColor: Color {
         canFillDetails ? accentColor.wcagContrastingSolidTextColor : .white.opacity(0.45)
+    }
+
+    private func dismissKeyboard() {
+        UIApplication.shared.sendAction(
+            #selector(UIResponder.resignFirstResponder),
+            to: nil,
+            from: nil,
+            for: nil
+        )
     }
 
     private func fillDetails() async {
@@ -479,7 +526,9 @@ struct RoutineTaskFieldsForm: View {
         environment = response.environment.trimmingCharacters(in: .whitespacesAndNewlines)
         environmentIsCustom = !environment.isEmpty && !placePresets.contains(environment)
         reward = response.reward.trimmingCharacters(in: .whitespacesAndNewlines)
+        rewardEnabled = !reward.isEmpty
         consequence = response.consequence.trimmingCharacters(in: .whitespacesAndNewlines)
+        consequenceEnabled = !consequence.isEmpty
 
         steps = response.steps
             .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
@@ -541,7 +590,7 @@ struct RoutineTaskFieldsForm: View {
             .background(LColors.glassSurface, in: RoundedRectangle(cornerRadius: 20, style: .continuous))
             .overlay {
                 RoundedRectangle(cornerRadius: 20, style: .continuous)
-                    .strokeBorder(accent.opacity(0.45), lineWidth: 1)
+                    .strokeBorder(LColors.glassBorder, lineWidth: 1)
             }
         }
         .buttonStyle(.plain)
@@ -582,7 +631,7 @@ struct RoutineTaskFieldsForm: View {
                 .background(LColors.glassSurface, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
                 .overlay {
                     RoundedRectangle(cornerRadius: 16, style: .continuous)
-                        .strokeBorder(accent.opacity(0.35), lineWidth: 1)
+                        .strokeBorder(LColors.glassBorder, lineWidth: 1)
                 }
         }
     }
@@ -593,10 +642,18 @@ struct RoutineTaskFieldsForm: View {
                 .lineLimit(2...6)
                 .font(.system(size: 14, weight: .medium, design: .rounded))
                 .foregroundStyle(textColor)
+                .submitLabel(.done)
+                .onSubmit { dismissKeyboard() }
         }
     }
 
-    private func toggleCard(title: String, subtitle: String, isOn: Binding<Bool>) -> some View {
+    private func toggleCard(
+        title: String,
+        subtitle: String,
+        isOn: Binding<Bool>,
+        icon: String,
+        isDisabled: Bool = false
+    ) -> some View {
         HStack(spacing: 12) {
             VStack(alignment: .leading, spacing: 3) {
                 Text(title)
@@ -609,16 +666,21 @@ struct RoutineTaskFieldsForm: View {
 
             Spacer()
 
-            Toggle("", isOn: isOn)
-                .labelsHidden()
-                .tint(accentColor)
+            LureliaSlidingIconToggle(
+                isOn: isOn,
+                iconName: icon,
+                accentColor: accentColor,
+                accessibilityLabel: title,
+                isDisabled: isDisabled
+            )
         }
         .padding(14)
         .background(LColors.glassSurface, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
         .overlay {
             RoundedRectangle(cornerRadius: 16, style: .continuous)
-                .strokeBorder(accent.opacity(0.35), lineWidth: 1)
+                .strokeBorder(LColors.glassBorder, lineWidth: 1)
         }
+        .animation(.spring(response: 0.28, dampingFraction: 0.86), value: isOn.wrappedValue)
     }
 
     // MARK: - Environment (place picker + custom)
@@ -652,12 +714,14 @@ struct RoutineTaskFieldsForm: View {
                     .lineLimit(1...3)
                     .font(.system(size: 14, weight: .medium, design: .rounded))
                     .foregroundStyle(textColor)
+                    .submitLabel(.done)
+                    .onSubmit { dismissKeyboard() }
                     .padding(12)
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .background(LColors.glassSurface, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
                     .overlay {
                         RoundedRectangle(cornerRadius: 14, style: .continuous)
-                            .strokeBorder(accent.opacity(0.35), lineWidth: 1)
+                            .strokeBorder(LColors.glassBorder, lineWidth: 1)
                     }
             }
         }
@@ -757,7 +821,7 @@ struct RoutineTaskFieldsForm: View {
                         )
                         .overlay {
                             RoundedRectangle(cornerRadius: 12, style: .continuous)
-                                .strokeBorder(accent.opacity(active ? 0.7 : 0.3), lineWidth: 1)
+                                .strokeBorder(LColors.glassBorder, lineWidth: 1)
                         }
                 }
                 .buttonStyle(.plain)
@@ -789,7 +853,7 @@ struct RoutineTaskFieldsForm: View {
                             )
                             .overlay {
                                 RoundedRectangle(cornerRadius: 11, style: .continuous)
-                                    .strokeBorder(accent.opacity(active ? 0.7 : 0.3), lineWidth: 1)
+                                    .strokeBorder(LColors.glassBorder, lineWidth: 1)
                             }
                     }
                     .buttonStyle(.plain)
@@ -805,11 +869,13 @@ struct RoutineTaskFieldsForm: View {
                     TextField("Step", text: $step.title)
                         .font(.system(size: 14, weight: .semibold, design: .rounded))
                         .foregroundStyle(textColor)
-                        .padding(12)
+                        .submitLabel(.done)
+                        .onSubmit { dismissKeyboard() }
+                            .padding(12)
                         .background(LColors.glassSurface, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
                         .overlay {
                             RoundedRectangle(cornerRadius: 14, style: .continuous)
-                                .strokeBorder(accent.opacity(0.35), lineWidth: 1)
+                                .strokeBorder(LColors.glassBorder, lineWidth: 1)
                         }
 
                     removeButton { steps.removeAll { $0.id == step.id } }
@@ -831,11 +897,13 @@ struct RoutineTaskFieldsForm: View {
                     TextField("Supply", text: $supply.name)
                         .font(.system(size: 14, weight: .semibold, design: .rounded))
                         .foregroundStyle(textColor)
-                        .padding(12)
+                        .submitLabel(.done)
+                        .onSubmit { dismissKeyboard() }
+                            .padding(12)
                         .background(LColors.glassSurface, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
                         .overlay {
                             RoundedRectangle(cornerRadius: 14, style: .continuous)
-                                .strokeBorder(accent.opacity(0.35), lineWidth: 1)
+                                .strokeBorder(LColors.glassBorder, lineWidth: 1)
                         }
 
                     removeButton { supplies.removeAll { $0.id == supply.id } }
@@ -856,11 +924,13 @@ struct RoutineTaskFieldsForm: View {
                         TextField("Obstacle", text: $item.obstacle)
                             .font(.system(size: 14, weight: .semibold, design: .rounded))
                             .foregroundStyle(textColor)
-                            .padding(12)
+                            .submitLabel(.done)
+                            .onSubmit { dismissKeyboard() }
+                                    .padding(12)
                             .background(LColors.glassSurface, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
                             .overlay {
                                 RoundedRectangle(cornerRadius: 14, style: .continuous)
-                                    .strokeBorder(accent.opacity(0.35), lineWidth: 1)
+                                    .strokeBorder(LColors.glassBorder, lineWidth: 1)
                             }
 
                         removeButton { obstacles.removeAll { $0.id == item.id } }
@@ -870,7 +940,9 @@ struct RoutineTaskFieldsForm: View {
                         .lineLimit(1...3)
                         .font(.system(size: 13, weight: .medium, design: .rounded))
                         .foregroundStyle(secondaryTextColor)
-                        .padding(12)
+                        .submitLabel(.done)
+                        .onSubmit { dismissKeyboard() }
+                            .padding(12)
                         .frame(maxWidth: .infinity, alignment: .leading)
                         .background(LColors.glassSurface, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
                         .overlay {
@@ -923,7 +995,7 @@ struct RoutineTaskFieldsForm: View {
             .background(LColors.glassSurface, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
             .overlay {
                 RoundedRectangle(cornerRadius: 14, style: .continuous)
-                    .strokeBorder(accent.opacity(0.3), lineWidth: 1)
+                    .strokeBorder(LColors.glassBorder, lineWidth: 1)
             }
         }
         .buttonStyle(.plain)

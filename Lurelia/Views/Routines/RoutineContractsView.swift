@@ -93,7 +93,7 @@ struct RoutineContractsView: View {
         GlassCard(cornerRadius: 28) {
             VStack(spacing: 12) {
                 LureliaIconView(iconId: "stardoc", size: 42)
-                    .foregroundStyle(LGradients.header)
+                    .foregroundStyle(LColors.textPrimary)
 
                 Text("No contracts yet")
                     .font(.system(size: 22, weight: .black, design: .rounded))

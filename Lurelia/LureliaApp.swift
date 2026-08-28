@@ -1643,7 +1643,7 @@ struct LureliaApp: App {
 
                 if let tasks = duplicate.tasks {
                     for task in tasks {
-                        task.routine = keeper
+                        task.attach(to: keeper)
                         changed = true
                     }
                 }

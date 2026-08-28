@@ -115,17 +115,19 @@ struct RoutineTaskTemplateDetailView: View {
                         }
                     }
 
-                    if !template.reward.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                    let rewardText = template.reward.trimmingCharacters(in: .whitespacesAndNewlines)
+                    if (template.rewardEnabled ?? !rewardText.isEmpty) && !rewardText.isEmpty {
                         sectionCard(title: "Rewards", icon: "starhandtrophy") {
                             sectionLabel("What do I get for completing this?")
-                            sectionBody(template.reward)
+                            sectionBody(rewardText)
                         }
                     }
 
-                    if !template.consequence.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                    let consequenceText = template.consequence.trimmingCharacters(in: .whitespacesAndNewlines)
+                    if (template.consequenceEnabled ?? !consequenceText.isEmpty) && !consequenceText.isEmpty {
                         sectionCard(title: "Consequence", icon: "minuswavy") {
                             sectionLabel("What happens if this gets skipped?")
-                            sectionBody(template.consequence)
+                            sectionBody(consequenceText)
                         }
                     }
 

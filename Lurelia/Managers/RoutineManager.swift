@@ -86,6 +86,13 @@ final class RoutineManager: ObservableObject {
         
         // Keep active session alive if already running
         if let existing = (routine.runs ?? []).first(where: { $0.endedAt == nil }) {
+            if synchronizePendingRunTasks(
+                in: existing,
+                with: routine.sortedTasks
+            ) {
+                try? context.save()
+            }
+
             // Reset corrupt totalPausedSeconds if it exceeds the routine duration
             let maxPausedSeconds = TimeInterval(routine.durationMinutes * 60)
             if existing.totalPausedSeconds > maxPausedSeconds {
@@ -105,13 +112,14 @@ final class RoutineManager: ObservableObject {
         let run = LureliaRoutineRun(routine: routine)
         context.insert(run)
 
-        for (index, task) in routine.sortedTasks.enumerated() {
+        for task in routine.sortedTasks {
             let runTask = LureliaRoutineRunTask(
                 name: task.title,
                 notes: task.notes,
                 sortOrder: task.sortOrder
             )
             runTask.sourceStableTaskID = task.stableTaskID
+            runTask.state = runTaskState(for: task)
 
             context.insert(runTask)
             runTask.run = run
@@ -143,6 +151,13 @@ final class RoutineManager: ObservableObject {
     ) -> LureliaRoutineRun {
 
         if let existing = (routine.runs ?? []).first(where: { $0.endedAt == nil }) {
+            if synchronizePendingRunTasks(
+                in: existing,
+                with: routine.tasksForPhase(phase)
+            ) {
+                try? context.save()
+            }
+
             LureliaLiveActivityBridge.shared.update(
                 routine: routine,
                 run: existing
@@ -162,7 +177,7 @@ final class RoutineManager: ObservableObject {
 
         let phaseTasks = routine.tasksForPhase(phase)
 
-        for (index, task) in phaseTasks.enumerated() {
+        for task in phaseTasks {
             let runTask = LureliaRoutineRunTask(
                 name: task.title,
                 notes: task.notes,
@@ -170,6 +185,7 @@ final class RoutineManager: ObservableObject {
             )
 
             runTask.sourceStableTaskID = task.stableTaskID
+            runTask.state = runTaskState(for: task)
 
             context.insert(runTask)
             runTask.run = run
@@ -361,6 +377,75 @@ final class RoutineManager: ObservableObject {
             ?? routine.sortedTasks.first {
                 $0.title == runTask.taskName && $0.sortOrder == runTask.sortOrder
             }
+    }
+
+    private func routineTask(
+        for runTask: LureliaRoutineRunTask,
+        in sourceTasks: [LureliaRoutineTask]
+    ) -> LureliaRoutineTask? {
+        let sourceStableTaskID = runTask.sourceStableTaskID
+        if !sourceStableTaskID.isEmpty,
+           let match = sourceTasks.first(where: { $0.stableTaskID == sourceStableTaskID }) {
+            return match
+        }
+
+        return sourceTasks.first {
+            $0.title == runTask.taskName && $0.sortOrder == runTask.sortOrder
+        }
+    }
+
+    private func synchronizePendingRunTasks(
+        in run: LureliaRoutineRun,
+        with sourceTasks: [LureliaRoutineTask]
+    ) -> Bool {
+        var didChange = false
+
+        for runTask in run.tasks ?? [] where runTask.isPending {
+            guard let sourceTask = routineTask(
+                for: runTask,
+                in: sourceTasks
+            ) else {
+                continue
+            }
+
+            let sourceState = runTaskState(for: sourceTask)
+            guard sourceState != "pending" else { continue }
+
+            runTask.state = sourceState
+            didChange = true
+        }
+
+        return didChange
+    }
+
+    private func runTaskState(
+        for task: LureliaRoutineTask,
+        on day: Date = Date(),
+        calendar: Calendar = .current
+    ) -> String {
+        if let entry = task.sortedHistory.first(where: { calendar.isDate($0.date, inSameDayAs: day) }) {
+            return entry.wasCompleted ? "completed" : "skipped"
+        }
+
+        if let completedAt = task.completedAt,
+           calendar.isDate(completedAt, inSameDayAs: day) {
+            return "completed"
+        }
+
+        if let skippedAt = task.skippedAt,
+           calendar.isDate(skippedAt, inSameDayAs: day) {
+            return "skipped"
+        }
+
+        if task.isCompleted, task.completedAt == nil {
+            return "completed"
+        }
+
+        if task.isSkipped, task.skippedAt == nil {
+            return "skipped"
+        }
+
+        return "pending"
     }
     
     // MARK: - Finish

@@ -238,6 +238,7 @@ final class RoutineTaskManager: ObservableObject {
             skipReason: "",
             note: note.trimmingCharacters(in: .whitespacesAndNewlines)
         )
+        entry.routineTaskIDString = task.routineScopedTaskID
         context.insert(entry)
         entry.task = task
         if task.historyItems == nil { task.historyItems = [] }
@@ -276,6 +277,7 @@ final class RoutineTaskManager: ObservableObject {
             skipReason: reason.trimmingCharacters(in: .whitespacesAndNewlines),
             note: ""
         )
+        entry.routineTaskIDString = task.routineScopedTaskID
         context.insert(entry)
         entry.task = task
         if task.historyItems == nil { task.historyItems = [] }

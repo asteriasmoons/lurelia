@@ -10,6 +10,8 @@
 	<string>Lurelia uses calendar access to show Apple Calendar events beside your Lurelia events and sync events when you turn syncing on.</string>
 	<key>NSCalendarsUsageDescription</key>
 	<string>Lurelia uses calendar access to show Apple Calendar events beside your Lurelia events.</string>
+	<key>NSSupportsLiveActivities</key>
+	<true/>
 	<key>UIBackgroundModes</key>
 	<array>
 		<string>remote-notification</string>

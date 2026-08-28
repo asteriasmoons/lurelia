@@ -362,7 +362,7 @@ struct RoutineTaskTemplateLibraryView: View {
         let (task, steps, supplies, obstacles) = template.makeTask(sortOrder: nextSortOrder)
 
         modelContext.insert(task)
-        task.routine = routine
+        task.attach(to: routine)
         if let phase {
             task.phaseID = phase.persistentID
         }

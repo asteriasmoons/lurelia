@@ -16,6 +16,7 @@ final class LureliaHabitSkip {
     // MARK: - Core
 
     var dayStart: Date = Date()
+    var habitIDString: String = ""
 
     // MARK: - Metadata
 
@@ -31,6 +32,7 @@ final class LureliaHabitSkip {
     init(habit: LureliaHabit, dayStart: Date) {
         self.id = UUID()
         self.habit = habit
+        self.habitIDString = habit.id.uuidString
         self.dayStart = Calendar.current.startOfDay(for: dayStart)
         self.createdAt = Date()
         self.updatedAt = Date()

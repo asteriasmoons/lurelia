@@ -457,6 +457,7 @@ struct LureliaHabitCard: View {
         }
 
         if let existing = todaysLog {
+            existing.habitIDString = habit.id.uuidString
             if existing.count < cap {
                 existing.count = min(cap, existing.count + 1)
                 existing.updatedAt = Date()
@@ -527,6 +528,7 @@ struct LureliaHabitCard: View {
             habit: habit,
             dayStart: todayStart
         )
+        skip.habitIDString = habit.id.uuidString
 
         modelContext.insert(skip)
         habit.skips = (habit.skips ?? []) + [skip]

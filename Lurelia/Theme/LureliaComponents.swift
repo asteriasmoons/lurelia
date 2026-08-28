@@ -125,6 +125,99 @@ struct LureliaGradientStepper: View {
     }
 }
 
+// MARK: - Sliding Icon Toggle
+
+struct LureliaSlidingIconToggle: View {
+    @Binding var isOn: Bool
+    let iconName: String
+    var accentColor: Color
+    var accessibilityLabel: String
+    var isDisabled: Bool = false
+    var width: CGFloat = 58
+    var height: CGFloat = 32
+
+    private var knobSize: CGFloat {
+        max(24, height - 6)
+    }
+
+    var body: some View {
+        Button {
+            toggle()
+        } label: {
+            ZStack {
+                Capsule()
+                    .fill(trackFill)
+                    .overlay {
+                        Capsule()
+                            .strokeBorder(trackStroke, lineWidth: 1)
+                    }
+
+                HStack {
+                    if isOn { Spacer(minLength: 0) }
+
+                    ZStack {
+                        Circle()
+                            .fill(knobFill)
+                            .overlay {
+                                Circle()
+                                    .strokeBorder(knobStroke, lineWidth: 1)
+                            }
+
+                        Image(iconName)
+                            .renderingMode(.template)
+                            .resizable()
+                            .scaledToFit()
+                            .frame(width: 14, height: 14)
+                            .foregroundStyle(knobIconColor)
+                    }
+                    .frame(width: knobSize, height: knobSize)
+
+                    if !isOn { Spacer(minLength: 0) }
+                }
+                .padding(3)
+            }
+            .frame(width: width, height: height)
+            .contentShape(Capsule())
+        }
+        .buttonStyle(.plain)
+        .disabled(isDisabled)
+        .opacity(isDisabled ? 0.45 : 1)
+        .animation(.spring(response: 0.28, dampingFraction: 0.86), value: isOn)
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(accessibilityLabel)
+        .accessibilityValue(isOn ? "On" : "Off")
+        .accessibilityAddTraits(.isButton)
+        .accessibilityAction { toggle() }
+    }
+
+    private var trackFill: Color {
+        isOn ? accentColor.opacity(0.24) : Color.white.opacity(0.07)
+    }
+
+    private var trackStroke: Color {
+        isOn ? accentColor.opacity(0.58) : Color.white.opacity(0.16)
+    }
+
+    private var knobFill: Color {
+        isOn ? accentColor : LColors.glassSurface2
+    }
+
+    private var knobStroke: Color {
+        isOn ? Color.white.opacity(0.16) : Color.white.opacity(0.12)
+    }
+
+    private var knobIconColor: Color {
+        isOn ? accentColor.wcagContrastingSolidTextColor : .white.opacity(0.62)
+    }
+
+    private func toggle() {
+        guard !isDisabled else { return }
+        withAnimation(.spring(response: 0.28, dampingFraction: 0.86)) {
+            isOn.toggle()
+        }
+    }
+}
+
 private struct LureliaRepeatingStepperButton: View {
     let icon: String
     let isEnabled: Bool

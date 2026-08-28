@@ -228,7 +228,7 @@ struct AddRoutineView: View {
                                         newPrinciple = ""
                                     } label: {
                                         Image("addwavy").renderingMode(.template).resizable().scaledToFit()
-                                            .frame(width: 14, height: 14).foregroundStyle(LGradients.header)
+                                            .frame(width: 14, height: 14).foregroundStyle(selectedColor)
                                             .frame(width: 32, height: 32)
                                             .background(LColors.glassSurface2, in: Circle())
                                             .overlay(Circle().strokeBorder(LColors.glassBorder, lineWidth: 1))
@@ -510,12 +510,13 @@ struct AddRoutineView: View {
     private var addTaskSheet: some View {
         if let editIndex = editingRoutineTaskIndex {
             AddCustomRoutineTaskView(
-                initialDraft: routineTasks[editIndex]
+                initialDraft: routineTasks[editIndex],
+                tint: selectedColor
             ) { draft in
                 routineTasks[editIndex] = draft
             }
         } else {
-            AddCustomRoutineTaskView { draft in
+            AddCustomRoutineTaskView(tint: selectedColor) { draft in
                 routineTasks.append(draft)
             }
         }
@@ -527,7 +528,7 @@ struct AddRoutineView: View {
             switch target.mode {
 
             case .add:
-                AddCustomRoutineTaskView { draft in
+                AddCustomRoutineTaskView(tint: selectedColor) { draft in
                     phaseDrafts[target.phaseIndex].tasks.append(draft)
 
                     print("Added phase task")
@@ -539,7 +540,8 @@ struct AddRoutineView: View {
             case .edit(let taskIndex):
                 if taskIndex < phaseDrafts[target.phaseIndex].tasks.count {
                     AddCustomRoutineTaskView(
-                        initialDraft: phaseDrafts[target.phaseIndex].tasks[taskIndex]
+                        initialDraft: phaseDrafts[target.phaseIndex].tasks[taskIndex],
+                        tint: selectedColor
                     ) { draft in
                         phaseDrafts[target.phaseIndex].tasks[taskIndex] = draft
 
@@ -937,7 +939,9 @@ struct AddRoutineView: View {
         d.triggerReason = task.triggerReason
         d.environment = task.environment
         d.reward = task.reward
+        d.rewardEnabled = task.rewardEnabled ?? !task.reward.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
         d.consequence = task.consequence
+        d.consequenceEnabled = task.consequenceEnabled ?? !task.consequence.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
         d.recoveryPlan = task.recoveryPlan
 
         d.hasDueTime = task.hasDueTime
@@ -1061,7 +1065,7 @@ struct AddRoutineView: View {
                         sortOrder: taskIndex
                     )
                     task.phaseID = phaseIDString
-                    task.routine = routine
+                    task.attach(to: routine)
                     modelContext.insert(task)
                     applyTaskDraft(taskDraft, to: task)
                 }
@@ -1074,7 +1078,7 @@ struct AddRoutineView: View {
                     notes: draft.notes.trimmingCharacters(in: .whitespacesAndNewlines),
                     sortOrder: index
                 )
-                task.routine = routine
+                task.attach(to: routine)
                 modelContext.insert(task)
                 applyTaskDraft(draft, to: task)
             }
@@ -1092,6 +1096,7 @@ struct AddRoutineView: View {
             print("🚨 [AddRoutine] SAVE FAILED (reminder sync): \(error)")
         }
         scheduleRoutineTaskNotifications(for: routine)
+        LureliaWidgetReloads.reloadDueRoutines()
         if editingRoutine == nil { onCreated?(routine) }
         
         Task {
@@ -1125,7 +1130,9 @@ struct AddRoutineView: View {
         task.triggerReason = draft.triggerReason.trimmingCharacters(in: .whitespacesAndNewlines)
         task.environment = draft.environment.trimmingCharacters(in: .whitespacesAndNewlines)
         task.reward = draft.reward.trimmingCharacters(in: .whitespacesAndNewlines)
+        task.rewardEnabled = draft.rewardEnabled
         task.consequence = draft.consequence.trimmingCharacters(in: .whitespacesAndNewlines)
+        task.consequenceEnabled = draft.consequenceEnabled
         task.recoveryPlan = draft.recoveryPlan.trimmingCharacters(in: .whitespacesAndNewlines)
 
         task.hasDueTime = draft.hasDueTime
@@ -1371,6 +1378,7 @@ struct AddCustomRoutineTaskView: View {
     @Environment(\.dismiss) private var dismiss
 
     let onSave: (LureliaRoutineTaskDraft) -> Void
+    let tint: Color
 
     private let isEditing: Bool
     private let baseDraft: LureliaRoutineTaskDraft
@@ -1389,7 +1397,9 @@ struct AddCustomRoutineTaskView: View {
     @State private var triggerReason: String
     @State private var environment: String
     @State private var reward: String
+    @State private var rewardEnabled: Bool
     @State private var consequence: String
+    @State private var consequenceEnabled: Bool
     @State private var recoveryPlan: String
 
     // Schedule
@@ -1413,9 +1423,11 @@ struct AddCustomRoutineTaskView: View {
 
     init(
         initialDraft: LureliaRoutineTaskDraft = LureliaRoutineTaskDraft(name: ""),
+        tint: Color = LColors.gradientPurple,
         onSave: @escaping (LureliaRoutineTaskDraft) -> Void
     ) {
         self.onSave = onSave
+        self.tint = tint
         self.baseDraft = initialDraft
         self.isEditing = !initialDraft.name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
 
@@ -1431,7 +1443,9 @@ struct AddCustomRoutineTaskView: View {
         _triggerReason = State(initialValue: initialDraft.triggerReason)
         _environment = State(initialValue: initialDraft.environment)
         _reward = State(initialValue: initialDraft.reward)
+        _rewardEnabled = State(initialValue: initialDraft.rewardEnabled)
         _consequence = State(initialValue: initialDraft.consequence)
+        _consequenceEnabled = State(initialValue: initialDraft.consequenceEnabled)
         _recoveryPlan = State(initialValue: initialDraft.recoveryPlan)
 
         _hasDueTime = State(initialValue: initialDraft.hasDueTime)
@@ -1462,8 +1476,8 @@ struct AddCustomRoutineTaskView: View {
 
                 ScrollView(showsIndicators: false) {
                     RoutineTaskFieldsForm(
-                        accent: AnyShapeStyle(LGradients.header),
-                        accentColor: LColors.gradientPurple,
+                        accent: AnyShapeStyle(tint),
+                        accentColor: tint,
                         title: $taskName,
                         notes: $notes,
                         taskContext: $taskContext,
@@ -1475,7 +1489,9 @@ struct AddCustomRoutineTaskView: View {
                         triggerReason: $triggerReason,
                         environment: $environment,
                         reward: $reward,
+                        rewardEnabled: $rewardEnabled,
                         consequence: $consequence,
+                        consequenceEnabled: $consequenceEnabled,
                         recoveryPlan: $recoveryPlan,
                         hasDueTime: $hasDueTime,
                         dueHour: $dueHour,
@@ -1533,7 +1549,9 @@ struct AddCustomRoutineTaskView: View {
         draft.triggerReason = triggerReason.trimmingCharacters(in: .whitespacesAndNewlines)
         draft.environment = environment.trimmingCharacters(in: .whitespacesAndNewlines)
         draft.reward = reward.trimmingCharacters(in: .whitespacesAndNewlines)
+        draft.rewardEnabled = rewardEnabled
         draft.consequence = consequence.trimmingCharacters(in: .whitespacesAndNewlines)
+        draft.consequenceEnabled = consequenceEnabled
         draft.recoveryPlan = recoveryPlan.trimmingCharacters(in: .whitespacesAndNewlines)
 
         draft.hasDueTime = hasDueTime
@@ -1576,7 +1594,9 @@ struct LureliaRoutineTaskDraft: Identifiable {
     var triggerReason: String = ""
     var environment: String = ""
     var reward: String = ""
+    var rewardEnabled: Bool = false
     var consequence: String = ""
+    var consequenceEnabled: Bool = false
     var recoveryPlan: String = ""
 
     // MARK: - Schedule

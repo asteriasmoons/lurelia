@@ -165,17 +165,19 @@ struct RoutineTaskDetailView: View {
                         frictionBox
                     }
 
-                    if !task.reward.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                    let rewardText = task.reward.trimmingCharacters(in: .whitespacesAndNewlines)
+                    if (task.rewardEnabled ?? !rewardText.isEmpty) && !rewardText.isEmpty {
                         sectionCard(title: "Rewards", icon: "starhandtrophy") {
                             sectionLabel("What do I get for completing this?")
-                            sectionBody(task.reward)
+                            sectionBody(rewardText)
                         }
                     }
 
-                    if !task.consequence.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                    let consequenceText = task.consequence.trimmingCharacters(in: .whitespacesAndNewlines)
+                    if (task.consequenceEnabled ?? !consequenceText.isEmpty) && !consequenceText.isEmpty {
                         sectionCard(title: "Consequence", icon: "minuswavy") {
                             sectionLabel("What happens if this gets skipped?")
-                            sectionBody(task.consequence)
+                            sectionBody(consequenceText)
                         }
                     }
 

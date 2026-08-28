@@ -37,25 +37,33 @@ final class LureliaLiveActivityBridge {
             return
         }
         
-        let endDate = endDateFor(routine: routine)
+        let endDate = endDateFor(routine: routine, run: run)
         
         let state = LureliaRoutineActivityAttributes.ContentState(
             routineName: routine.name,
-            completedCount: 0,
+            completedCount: run.completedCount,
             totalCount: run.totalCount,
             endDate: endDate,
-            isFinished: false,
+            isFinished: run.allDone,
             colorHex: routine.colorHex
         )
         
         let attributes = LureliaRoutineActivityAttributes(
-            routineID: routine.persistentModelID.hashValue.description
+            routineID: activityID(for: routine)
         )
         
         let content = ActivityContent(
             state: state,
             staleDate: endDate.addingTimeInterval(300)
         )
+
+        if let existingActivity = existingActivity(for: routine) {
+            currentActivity = existingActivity
+            Task {
+                await existingActivity.update(content)
+            }
+            return
+        }
         
         do {
             currentActivity = try Activity.request(
@@ -81,11 +89,16 @@ final class LureliaLiveActivityBridge {
         
         #if canImport(ActivityKit)
         
-        guard let activity = currentActivity else {
+        guard let activity = matchingCurrentActivity(for: routine) ?? existingActivity(for: routine) else {
+            if run.isActive {
+                start(routine: routine, run: run)
+            }
             return
         }
+
+        currentActivity = activity
         
-        let endDate = endDateFor(routine: routine)
+        let endDate = endDateFor(routine: routine, run: run)
         
         let state = LureliaRoutineActivityAttributes.ContentState(
             routineName: routine.name,
@@ -135,21 +148,83 @@ final class LureliaLiveActivityBridge {
     // MARK: - Helpers
     
     private func endDateFor(
-        routine: LureliaRoutine
+        routine: LureliaRoutine,
+        run: LureliaRoutineRun
     ) -> Date {
-        
+        let startedAt = run.startedAt
+        let pausedSeconds = run.totalPausedSeconds
+
         let calendar = Calendar.current
-        
-        var components = calendar.dateComponents(
-            [.year, .month, .day],
-            from: Date()
-        )
-        
-        components.hour = routine.endHour
-        components.minute = routine.endMinute
-        components.second = 0
-        
-        return calendar.date(from: components)
-        ?? Date().addingTimeInterval(1800)
+
+        if routine.scheduleEnabled {
+            var startComponents = calendar.dateComponents([.year, .month, .day], from: startedAt)
+            startComponents.hour = routine.startHour
+            startComponents.minute = routine.startMinute
+            startComponents.second = 0
+            let scheduledStart = calendar.date(from: startComponents) ?? startedAt
+
+            var endComponents = calendar.dateComponents([.year, .month, .day], from: scheduledStart)
+            endComponents.hour = routine.endHour
+            endComponents.minute = routine.endMinute
+            endComponents.second = 0
+
+            var scheduledEnd = calendar.date(from: endComponents)
+                ?? startedAt.addingTimeInterval(TimeInterval(routine.durationMinutes * 60))
+
+            if scheduledEnd <= scheduledStart {
+                scheduledEnd = calendar.date(byAdding: .day, value: 1, to: scheduledEnd)
+                    ?? scheduledEnd.addingTimeInterval(86_400)
+            }
+
+            if routine.durationMode,
+               startedAt < scheduledStart || startedAt > scheduledEnd {
+                return startedAt
+                    .addingTimeInterval(TimeInterval(max(1, routine.durationMinutesOverride) * 60))
+                    .addingTimeInterval(pausedSeconds)
+            }
+
+            return scheduledEnd
+        }
+
+        if routine.durationMode {
+            return startedAt
+                .addingTimeInterval(TimeInterval(max(1, routine.durationMinutesOverride) * 60))
+                .addingTimeInterval(pausedSeconds)
+        }
+
+        return startedAt
+            .addingTimeInterval(TimeInterval(routine.durationMinutes * 60))
+            .addingTimeInterval(pausedSeconds)
     }
+
+    private func activityID(for routine: LureliaRoutine) -> String {
+        routine.persistentID.isEmpty
+            ? routine.persistentModelID.hashValue.description
+            : routine.persistentID
+    }
+
+    private func legacyActivityID(for routine: LureliaRoutine) -> String {
+        routine.persistentModelID.hashValue.description
+    }
+
+    #if canImport(ActivityKit)
+    private func existingActivity(
+        for routine: LureliaRoutine
+    ) -> Activity<LureliaRoutineActivityAttributes>? {
+        let ids = Set([activityID(for: routine), legacyActivityID(for: routine)])
+        return Activity<LureliaRoutineActivityAttributes>.activities.first {
+            ids.contains($0.attributes.routineID)
+        }
+    }
+
+    private func matchingCurrentActivity(
+        for routine: LureliaRoutine
+    ) -> Activity<LureliaRoutineActivityAttributes>? {
+        guard let currentActivity else { return nil }
+        let ids = Set([activityID(for: routine), legacyActivityID(for: routine)])
+        return ids.contains(currentActivity.attributes.routineID)
+            ? currentActivity
+            : nil
+    }
+    #endif
 }

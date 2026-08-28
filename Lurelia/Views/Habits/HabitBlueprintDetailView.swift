@@ -797,6 +797,7 @@ struct HabitBlueprintDetailView: View {
         let calendar = Calendar.current
         let today = Date()
         guard let todayLog = habit.todaysLog(calendar: calendar) else { return }
+        todayLog.habitIDString = habit.id.uuidString
 
         let didUndo = todayLog.undoLatestCompletion(
             fireDates: habit.fireDates(on: today, calendar: calendar),

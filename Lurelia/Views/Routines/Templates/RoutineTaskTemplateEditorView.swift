@@ -37,7 +37,9 @@ struct RoutineTaskTemplateEditorView: View {
     @State private var triggerReason: String
     @State private var environment: String
     @State private var reward: String
+    @State private var rewardEnabled: Bool
     @State private var consequence: String
+    @State private var consequenceEnabled: Bool
     @State private var recoveryPlan: String
     @State private var hasDueTime: Bool
     @State private var dueHour: Int
@@ -69,7 +71,9 @@ struct RoutineTaskTemplateEditorView: View {
         _triggerReason = State(initialValue: template.triggerReason)
         _environment = State(initialValue: template.environment)
         _reward = State(initialValue: template.reward)
+        _rewardEnabled = State(initialValue: template.rewardEnabled ?? !template.reward.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
         _consequence = State(initialValue: template.consequence)
+        _consequenceEnabled = State(initialValue: template.consequenceEnabled ?? !template.consequence.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
         _recoveryPlan = State(initialValue: template.recoveryPlan)
         _hasDueTime = State(initialValue: template.hasDueTime)
         _dueHour = State(initialValue: template.dueHour)
@@ -114,7 +118,9 @@ struct RoutineTaskTemplateEditorView: View {
                             triggerReason: $triggerReason,
                             environment: $environment,
                             reward: $reward,
+                            rewardEnabled: $rewardEnabled,
                             consequence: $consequence,
+                            consequenceEnabled: $consequenceEnabled,
                             recoveryPlan: $recoveryPlan,
                             hasDueTime: $hasDueTime,
                             dueHour: $dueHour,
@@ -210,7 +216,9 @@ struct RoutineTaskTemplateEditorView: View {
                 triggerReason: triggerReason,
                 environment: environment,
                 reward: reward,
+                rewardEnabled: rewardEnabled,
                 consequence: consequence,
+                consequenceEnabled: consequenceEnabled,
                 recoveryPlan: recoveryPlan,
                 hasDueTime: hasDueTime,
                 dueHour: dueHour,
@@ -259,7 +267,9 @@ struct TemplateFieldState {
     var triggerReason: String
     var environment: String
     var reward: String
+    var rewardEnabled: Bool
     var consequence: String
+    var consequenceEnabled: Bool
     var recoveryPlan: String
     var hasDueTime: Bool
     var dueHour: Int
@@ -291,7 +301,9 @@ enum RoutineTaskTemplateWriter {
         template.triggerReason = state.triggerReason.trimmingCharacters(in: .whitespacesAndNewlines)
         template.environment = state.environment.trimmingCharacters(in: .whitespacesAndNewlines)
         template.reward = state.reward.trimmingCharacters(in: .whitespacesAndNewlines)
+        template.rewardEnabled = state.rewardEnabled
         template.consequence = state.consequence.trimmingCharacters(in: .whitespacesAndNewlines)
+        template.consequenceEnabled = state.consequenceEnabled
         template.recoveryPlan = state.recoveryPlan.trimmingCharacters(in: .whitespacesAndNewlines)
 
         template.hasDueTime = state.hasDueTime

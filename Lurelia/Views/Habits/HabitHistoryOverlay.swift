@@ -187,6 +187,7 @@ struct LureliaHabitHistoryOverlay: View {
                 }
 
                 try? modelContext.save()
+                LureliaWidgetReloads.reloadHabits()
             }
 
             Button("Cancel", role: .cancel) { }

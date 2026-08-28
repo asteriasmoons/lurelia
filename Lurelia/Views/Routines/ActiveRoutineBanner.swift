@@ -96,17 +96,12 @@ struct ActiveRoutineBanner: View {
             .padding(.vertical, 12)
             .background {
                 RoundedRectangle(cornerRadius: 22, style: .continuous)
-                    .fill(Color(lureliaHex: "#10101A").opacity(0.96))
-                    .overlay {
-                        RoundedRectangle(cornerRadius: 22, style: .continuous)
-                            .fill(tint.opacity(0.22))
-                    }
+                    .fill(tint.opacity(0.26))
                     .overlay {
                         RoundedRectangle(cornerRadius: 22, style: .continuous)
                             .strokeBorder(tint.opacity(0.55), lineWidth: 1)
                     }
             }
-            .shadow(color: Color.black.opacity(0.35), radius: 18, x: 0, y: 10)
         }
         .buttonStyle(.plain)
         .padding(.horizontal, 16)

@@ -109,6 +109,7 @@ final class LureliaRoutineTaskHistoryEntry {
     var wasCompleted: Bool = true
     var skipReason: String = ""
     var note: String = ""
+    var routineTaskIDString: String = ""
 
     var task: LureliaRoutineTask?
 

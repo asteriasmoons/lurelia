@@ -212,6 +212,7 @@ struct RoutinesView: View {
 
         modelContext.delete(routine)
         try? modelContext.save()
+        LureliaWidgetReloads.reloadDueRoutines()
     }
 
     private var emptyState: some View {
@@ -223,7 +224,7 @@ struct RoutinesView: View {
                 .resizable()
                 .scaledToFit()
                 .frame(width: 56, height: 56)
-                .foregroundStyle(LGradients.header)
+                .foregroundStyle(LColors.textPrimary)
 
             Text("No routines yet")
                 .font(.title3)

@@ -2314,7 +2314,7 @@ private struct EditRoutinePhaseSheet: View {
             sortOrder: phaseTasks.count
         )
         task.phaseID = phase.id.uuidString
-        task.routine = routine
+        task.attach(to: routine)
 
         modelContext.insert(task)
 
@@ -2377,7 +2377,9 @@ private struct EditRoutinePhaseSheet: View {
         task.triggerReason = draft.triggerReason.trimmingCharacters(in: .whitespacesAndNewlines)
         task.environment = draft.environment.trimmingCharacters(in: .whitespacesAndNewlines)
         task.reward = draft.reward.trimmingCharacters(in: .whitespacesAndNewlines)
+        task.rewardEnabled = draft.rewardEnabled
         task.consequence = draft.consequence.trimmingCharacters(in: .whitespacesAndNewlines)
+        task.consequenceEnabled = draft.consequenceEnabled
         task.recoveryPlan = draft.recoveryPlan.trimmingCharacters(in: .whitespacesAndNewlines)
 
         task.hasDueTime = draft.hasDueTime

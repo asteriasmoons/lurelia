@@ -54,7 +54,9 @@ final class RoutineTaskTemplate {
     var environment: String = ""
     var friction: String = ""
     var reward: String = ""
+    var rewardEnabled: Bool? = nil
     var consequence: String = ""
+    var consequenceEnabled: Bool? = nil
     var recoveryPlan: String = ""
 
     // MARK: Schedule defaults
@@ -167,7 +169,9 @@ extension RoutineTaskTemplate {
         template.environment = task.environment
         template.friction = task.friction
         template.reward = task.reward
+        template.rewardEnabled = task.rewardEnabled ?? !task.reward.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
         template.consequence = task.consequence
+        template.consequenceEnabled = task.consequenceEnabled ?? !task.consequence.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
         template.recoveryPlan = task.recoveryPlan
 
         template.hasDueTime = task.hasDueTime
@@ -220,7 +224,9 @@ extension RoutineTaskTemplate {
         task.environment = environment
         task.friction = friction
         task.reward = reward
+        task.rewardEnabled = rewardEnabled ?? !reward.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
         task.consequence = consequence
+        task.consequenceEnabled = consequenceEnabled ?? !consequence.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
         task.recoveryPlan = recoveryPlan
 
         task.hasDueTime = hasDueTime

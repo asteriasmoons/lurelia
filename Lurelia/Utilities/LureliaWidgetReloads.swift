@@ -25,13 +25,15 @@ import Foundation
 import WidgetKit
 
 enum LureliaWidgetReloads {
+    private static let dueRoutinesKind = "LureliaDueRoutinesWidget"
+    private static let habitsKind = "LureliaHabitsWidget"
 
     /// Widget kinds that render user content and therefore need to be
     /// reloaded whenever any tracked mutation happens.
     private static let contentWidgetKinds: [String] = [
         "LureliaDueRemindersWidget",
-        "LureliaDueRoutinesWidget",
-        "LureliaHabitsWidget",
+        dueRoutinesKind,
+        habitsKind,
         "LureliaUpcomingEventsWidget",
         "LureliaKanbanTimelineWidget",
     ]
@@ -43,5 +45,18 @@ enum LureliaWidgetReloads {
             WidgetCenter.shared.reloadTimelines(ofKind: kind)
         }
         WidgetCenter.shared.reloadAllTimelines()
+    }
+
+    static func reloadDueRoutines() {
+        WidgetCenter.shared.reloadTimelines(ofKind: dueRoutinesKind)
+    }
+
+    static func reloadHabits() {
+        WidgetCenter.shared.reloadTimelines(ofKind: habitsKind)
+    }
+
+    static func reloadHabitsAndDueRoutines() {
+        reloadHabits()
+        reloadDueRoutines()
     }
 }

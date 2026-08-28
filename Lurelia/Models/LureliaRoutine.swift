@@ -63,6 +63,7 @@ final class LureliaRoutineTask {
     // MARK: - Relationship
     
     var routine: LureliaRoutine?
+    var routinePersistentIDString: String = ""
     
     // MARK: - Phase Link
 
@@ -88,8 +89,14 @@ final class LureliaRoutineTask {
     var friction: String = ""
     /// The reward associated with completing the task.
     var reward: String = ""
+    /// Whether the reward field is intentionally part of this task. `nil`
+    /// means legacy data should infer this from the stored reward text.
+    var rewardEnabled: Bool? = nil
     /// What happens if the task is not completed.
     var consequence: String = ""
+    /// Whether the consequence field is intentionally part of this task. `nil`
+    /// means legacy data should infer this from the stored consequence text.
+    var consequenceEnabled: Bool? = nil
     /// What to do after missing / skipping the task.
     var recoveryPlan: String = ""
 
@@ -154,6 +161,20 @@ final class LureliaRoutineTask {
     var isPending: Bool { state == "pending" }
     var isCompleted: Bool { state == "completed" }
     var isSkipped: Bool { state == "skipped" }
+
+    var routineScopedTaskID: String {
+        let routineID = routinePersistentIDString.isEmpty ? routine?.persistentID : routinePersistentIDString
+        return "\(routineID ?? "unlinked")::\(stableTaskID)"
+    }
+
+    func attach(to routine: LureliaRoutine) {
+        self.routine = routine
+        self.routinePersistentIDString = routine.persistentID
+    }
+
+    func matchesRoutineScopedTaskID(_ itemID: String) -> Bool {
+        itemID == routineScopedTaskID || itemID == stableTaskID
+    }
     
     func markCompleted() {
         state = "completed"

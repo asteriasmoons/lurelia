@@ -35,7 +35,9 @@ struct RoutineTaskEditorView: View {
     @State private var triggerReason: String
     @State private var environment: String
     @State private var reward: String
+    @State private var rewardEnabled: Bool
     @State private var consequence: String
+    @State private var consequenceEnabled: Bool
     @State private var recoveryPlan: String
 
     // Schedule
@@ -73,7 +75,9 @@ struct RoutineTaskEditorView: View {
         _triggerReason = State(initialValue: task.triggerReason)
         _environment = State(initialValue: task.environment)
         _reward = State(initialValue: task.reward)
+        _rewardEnabled = State(initialValue: task.rewardEnabled ?? !task.reward.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
         _consequence = State(initialValue: task.consequence)
+        _consequenceEnabled = State(initialValue: task.consequenceEnabled ?? !task.consequence.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
         _recoveryPlan = State(initialValue: task.recoveryPlan)
 
         _hasDueTime = State(initialValue: task.hasDueTime)
@@ -136,7 +140,9 @@ struct RoutineTaskEditorView: View {
                             triggerReason: $triggerReason,
                             environment: $environment,
                             reward: $reward,
+                            rewardEnabled: $rewardEnabled,
                             consequence: $consequence,
+                            consequenceEnabled: $consequenceEnabled,
                             recoveryPlan: $recoveryPlan,
                             hasDueTime: $hasDueTime,
                             dueHour: $dueHour,
@@ -194,7 +200,7 @@ struct RoutineTaskEditorView: View {
                     .resizable()
                     .scaledToFit()
                     .frame(width: 14, height: 14)
-                    .foregroundStyle(LGradients.header)
+                    .foregroundStyle(routineTint)
 
                 Text("Save as Template")
                     .font(.system(size: 14, weight: .black, design: .rounded))
@@ -282,7 +288,9 @@ struct RoutineTaskEditorView: View {
         task.triggerReason = triggerReason.trimmingCharacters(in: .whitespacesAndNewlines)
         task.environment = environment.trimmingCharacters(in: .whitespacesAndNewlines)
         task.reward = reward.trimmingCharacters(in: .whitespacesAndNewlines)
+        task.rewardEnabled = rewardEnabled
         task.consequence = consequence.trimmingCharacters(in: .whitespacesAndNewlines)
+        task.consequenceEnabled = consequenceEnabled
         task.recoveryPlan = recoveryPlan.trimmingCharacters(in: .whitespacesAndNewlines)
 
         task.hasDueTime = hasDueTime

@@ -200,21 +200,26 @@ final class HabitManager: ObservableObject {
                 .first(where: { $0.id == habitID }) else { return true }
 
         let todayStart = Calendar.current.startOfDay(for: Date())
+        var didMutate = false
 
         switch actionID {
         case Self.logActionID, UNNotificationDefaultActionIdentifier:
             // Quick-log one completion directly from the notification
             let cap = habit.target
             if let existing = habit.todaysLog() {
+                existing.habitIDString = habit.id.uuidString
                 if existing.count < cap {
                     existing.count  += 1
                     existing.updatedAt = Date()
                     habit.updatedAt    = Date()
+                    didMutate = true
                 }
             } else {
                 let log = LureliaHabitLog(habit: habit, dayStart: todayStart, count: 1)
                 context.insert(log)
+                habit.logs = (habit.logs ?? []) + [log]
                 habit.updatedAt = Date()
+                didMutate = true
             }
             try? context.save()
             print("✅ [HabitManager] Quick-logged '\(habit.title)' from notification")
@@ -224,7 +229,9 @@ final class HabitManager: ObservableObject {
             if habit.todaysSkip() == nil, habit.todaysLog() == nil {
                 let skip = LureliaHabitSkip(habit: habit, dayStart: todayStart)
                 context.insert(skip)
+                habit.skips = (habit.skips ?? []) + [skip]
                 habit.updatedAt = Date()
+                didMutate = true
                 try? context.save()
                 print("⏭ [HabitManager] Skipped '\(habit.title)' from notification")
             }
@@ -235,6 +242,9 @@ final class HabitManager: ObservableObject {
 
         // Reschedule so the next occurrence is queued
         schedule(habit)
+        if didMutate {
+            LureliaWidgetReloads.reloadHabits()
+        }
         return true
     }
 

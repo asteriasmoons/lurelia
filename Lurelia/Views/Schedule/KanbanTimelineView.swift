@@ -76,6 +76,7 @@ struct KanbanTimelineView: View {
     // @State and rebuilt only when their real inputs change (see
     // `rebuildTimelineCache` and the `.onChange` triggers on `body`).
     @State private var cachedTimelineOccurrences: [KanbanTimelineColumnOccurrence] = []
+    @State private var cachedTimelineOccurrenceRows: [String: [KanbanTimelineOccurrence]] = [:]
     @State private var cachedSelectedDayItemCount: Int = 0
     /// Bumped by completion / edit callbacks so a rebuild can be forced
     /// even when the raw arrays haven't changed shape (e.g., just a
@@ -207,7 +208,7 @@ struct KanbanTimelineView: View {
                         GeometryReader { proxy in
                             ScrollViewReader { scrollProxy in
                             ScrollView(.vertical, showsIndicators: false) {
-                            VStack(alignment: .leading, spacing: 16) {
+                            LazyVStack(alignment: .leading, spacing: 16) {
 
                                 selectedDayHeader
 
@@ -220,7 +221,7 @@ struct KanbanTimelineView: View {
                                         .padding(.top, 8)
                                         .padding(.bottom, 8)
 
-                                    VStack(alignment: .leading, spacing: 16) {
+                                    LazyVStack(alignment: .leading, spacing: 16) {
 
                                         timelineMarker(title: "Inbox")
 
@@ -264,6 +265,12 @@ struct KanbanTimelineView: View {
                                                             selectedDay: selectedDay,
                                                             now: timelineNow,
                                                             forcedFireDate: occurrence.fireDate,
+                                                            precomputedOccurrences: cachedTimelineOccurrenceRows[
+                                                                timelineOccurrenceRowKey(
+                                                                    columnID: occurrence.column.id,
+                                                                    fireDate: occurrence.fireDate
+                                                                )
+                                                            ],
                                                             allReminders: allReminders,
                                                             allRoutines: allRoutines,
                                                             allRoutineTasks: allRoutineTasks,
@@ -817,8 +824,14 @@ struct KanbanTimelineView: View {
     }
 
     private func rebuildTimelineCache() {
-        cachedTimelineOccurrences = computeTimelineColumnOccurrences()
+        let rows = computeTimelineOccurrenceRows()
+        cachedTimelineOccurrenceRows = rows
+        cachedTimelineOccurrences = computeTimelineColumnOccurrences(from: rows)
         cachedSelectedDayItemCount = computeSelectedDayScheduledItemCount()
+    }
+
+    private func timelineOccurrenceRowKey(columnID: UUID, fireDate: Date) -> String {
+        "\(columnID.uuidString)::\(fireDate.timeIntervalSince1970)"
     }
 
     // MARK: - Auto-scroll to "now"
@@ -1155,6 +1168,67 @@ struct KanbanTimelineView: View {
             allHabits: allHabits,
             calendar: calendar
         )
+    }
+
+    private func computeTimelineOccurrenceRows() -> [String: [KanbanTimelineOccurrence]] {
+        guard let board = selectedBoard else { return [:] }
+
+        var rows: [String: [KanbanTimelineOccurrence]] = [:]
+
+        let occurrences = KanbanTimelineEngine.occurrences(
+            for: board,
+            on: selectedDay,
+            allReminders: allReminders,
+            allRoutines: allRoutines,
+            allRoutineTasks: allRoutineTasks,
+            allHabits: allHabits,
+            calendar: calendar
+        )
+
+        for occurrence in occurrences {
+            guard let column = occurrence.column else { continue }
+            let key = timelineOccurrenceRowKey(
+                columnID: column.id,
+                fireDate: occurrence.fireDate
+            )
+            rows[key, default: []].append(occurrence)
+        }
+
+        for key in rows.keys {
+            rows[key]?.sort { left, right in
+                if left.fireDate != right.fireDate {
+                    return left.fireDate < right.fireDate
+                }
+
+                return left.card.sortOrder < right.card.sortOrder
+            }
+        }
+
+        return rows
+    }
+
+    private func computeTimelineColumnOccurrences(
+        from rows: [String: [KanbanTimelineOccurrence]]
+    ) -> [KanbanTimelineColumnOccurrence] {
+        rows.compactMap { _, occurrences in
+            guard let first = occurrences.first,
+                  let column = first.column
+            else {
+                return nil
+            }
+
+            return KanbanTimelineColumnOccurrence(
+                column: column,
+                fireDate: first.fireDate
+            )
+        }
+        .sorted { lhs, rhs in
+            if lhs.fireDate != rhs.fireDate {
+                return lhs.fireDate < rhs.fireDate
+            }
+
+            return lhs.column.sortOrder < rhs.column.sortOrder
+        }
     }
 
     /// Original in-view expansion — kept here (renamed) because a handful
@@ -1572,6 +1646,7 @@ struct KanbanTimelineColumnView: View {
     /// re-entering SwiftUI's body pipeline twice a minute.
     let now: Date
     var forcedFireDate: Date? = nil
+    var precomputedOccurrences: [KanbanTimelineOccurrence]? = nil
     let allReminders: [LureliaReminder]
     let allRoutines: [LureliaRoutine]
     let allRoutineTasks: [LureliaRoutineTask]
@@ -1591,6 +1666,10 @@ struct KanbanTimelineColumnView: View {
     }
 
     private var visibleOccurrences: [KanbanTimelineOccurrence] {
+        if let precomputedOccurrences {
+            return precomputedOccurrences
+        }
+
         // O(1) lookups per card instead of O(n) linear scans.
         let remindersByID: [String: LureliaReminder] = Dictionary(
             uniqueKeysWithValues: allReminders.map { ($0.id.uuidString, $0) }
@@ -1921,6 +2000,8 @@ struct KanbanTimelineColumnView: View {
     }
 
     var body: some View {
+        let displayRows = visibleDisplayRows
+
         VStack(alignment: .leading, spacing: 12) {
             HStack {
                 Text(column.name)
@@ -1929,7 +2010,7 @@ struct KanbanTimelineColumnView: View {
 
                 Spacer()
 
-                Text("\(visibleDisplayRows.count)")
+                Text("\(displayRows.count)")
                     .font(.system(size: 11, weight: .bold, design: .rounded))
                     .foregroundStyle(accentColor)
                     .padding(.horizontal, 8)
@@ -1962,11 +2043,11 @@ struct KanbanTimelineColumnView: View {
                 .padding(.horizontal, 10)
 
             VStack(spacing: 10) {
-                ForEach(visibleDisplayRows) { row in
+                ForEach(displayRows) { row in
                     displayRow(row)
                 }
 
-                if visibleDisplayRows.isEmpty {
+                if displayRows.isEmpty {
                     VStack(spacing: 8) {
                         Image("addwavy")
                             .renderingMode(.template)
